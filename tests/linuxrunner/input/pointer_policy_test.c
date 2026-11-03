@@ -17,7 +17,13 @@ int main(void) {
     CHECK("AssistiveTouch: right and middle from GCMouse", lr_pointer_use_gc_button(iphone_at, LR_POINTER_RIGHT) && lr_pointer_use_gc_button(iphone_at, LR_POINTER_MIDDLE));
     CHECK("AssistiveTouch without GCMouse: no GCMouse buttons", !lr_pointer_use_gc_button(iphone_at_no_gc, LR_POINTER_RIGHT));
     CHECK("GCMouse only: motion and all buttons", lr_pointer_use_gc_motion(gc_only) && lr_pointer_use_gc_button(gc_only, LR_POINTER_LEFT) && lr_pointer_use_gc_button(gc_only, LR_POINTER_RIGHT));
-    CHECK("iPad pointer: UIKit only (no double clicks)", !lr_pointer_use_gc_motion(ipad) && !lr_pointer_use_gc_button(ipad, LR_POINTER_LEFT) && !lr_pointer_use_gc_button(ipad, LR_POINTER_RIGHT));
+    CHECK("iPad pointer: UIKit position and GCMouse buttons", !lr_pointer_use_gc_motion(ipad) && lr_pointer_use_gc_button(ipad, LR_POINTER_LEFT) && lr_pointer_use_gc_button(ipad, LR_POINTER_RIGHT));
+    CHECK("detecting iPad pointer after button-down still routes button-up", lr_pointer_use_gc_button(gc_only, LR_POINTER_LEFT) && lr_pointer_use_gc_button(ipad, LR_POINTER_LEFT));
+    CHECK("iPad pointer: duplicate UIKit buttons suppressed", !lr_pointer_use_uikit_button(ipad, true, LR_POINTER_LEFT) && !lr_pointer_use_uikit_button(ipad, true, LR_POINTER_RIGHT));
+    LRPointerEnvironment ipad_no_gc = {.indirect_pointer = true, .hover = true};
+    CHECK("iPad pointer without GCMouse: UIKit buttons", lr_pointer_use_uikit_button(ipad_no_gc, true, LR_POINTER_LEFT) && lr_pointer_use_uikit_button(ipad_no_gc, true, LR_POINTER_RIGHT));
+    CHECK("connected mouse does not suppress finger/Pencil clicks", lr_pointer_use_uikit_button(ipad, false, LR_POINTER_LEFT));
+    CHECK("AssistiveTouch owns the UIKit left click", lr_pointer_use_uikit_button(iphone_at, false, LR_POINTER_LEFT));
     CHECK("secondary mask is right button", lr_pointer_touch_button(true) == 4 && lr_pointer_touch_button(false) == 1);
     CHECK("UIKit wheel ignored right after GCMouse wheel", !lr_pointer_use_uikit_wheel(10.1, 10.0) && lr_pointer_use_uikit_wheel(10.5, 10.0));
     printf("POINTER_POLICY_TEST %s failures=%d\n", fails ? "FAIL" : "PASS", fails);

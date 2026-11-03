@@ -82,6 +82,7 @@ static NSString *ApplicationPreflightFailure(NSURL *session) {
 
 #import "TouchScrollPolicy.h"
 #import "PointerPolicy.h"
+#import "KeyboardPolicy.h"
 #import "DisplayPolicy.h"
 @interface LRFramebufferView : UIView <UIKeyInput,UIGestureRecognizerDelegate,UIPointerInteractionDelegate>
 @property UIImageView *image;
@@ -113,6 +114,7 @@ static NSString *ApplicationPreflightFailure(NSURL *session) {
 @property UILongPressGestureRecognizer *secondaryGesture;
 @property(weak) UITouch *pointerTouch;
 @property uint8_t pointerTouchButton;
+@property uint8_t lastSentPointerButtons;
 @property BOOL sawIndirectPointer,sawHover,pointerModeActive;
 @property CFTimeInterval lastGCScroll;
 @property NSMutableDictionary<NSString *,NSNumber *> *inputCounts;
@@ -283,6 +285,7 @@ static NSString *ApplicationPreflightFailure(NSURL *session) {
 - (UITextSmartInsertDeleteType)smartInsertDeleteType{return UITextSmartInsertDeleteTypeNo;}
 - (void)trace:(NSString *)event{if(_traceInput&&_traceCount++<2000)[LRRuntimeBridge logCategory:@"GUI_INPUT" event:event];}
 - (void)insertText:(NSString *)text{
+    [self countInput:@"keyboard.text"];
     NSMutableData *symbols=[[text dataUsingEncoding:NSUTF32LittleEndianStringEncoding] mutableCopy];uint32_t *codes=symbols.mutableBytes;
     [self syncModifiers];
     for(NSUInteger i=0;i<symbols.length/4;i++){uint32_t c=codes[i];
@@ -303,7 +306,7 @@ static NSString *ApplicationPreflightFailure(NSURL *session) {
     _sentModifiers=desired;
 }
 - (void)releaseInput{
-    [_client pointerX:_pointerX y:_pointerY buttons:0];_stickyModifiers=0;_hardwareModifiers=0;[self syncModifiers];
+    [self sendPointerFromEventTime:0 buttons:0];_stickyModifiers=0;_hardwareModifiers=0;[self syncModifiers];
     _mouseButtons=0;_pointerTouchButton=0;_pointerTouch=nil;
     for(NSNumber *symbol in _pressedKeys.allValues)[_client key:symbol.unsignedIntValue down:NO];
     [_pressedKeys removeAllObjects];
@@ -333,16 +336,27 @@ static NSString *ApplicationPreflightFailure(NSURL *session) {
     }
     if(key.keyCode>=UIKeyboardHIDUsageKeyboardF1&&key.keyCode<=UIKeyboardHIDUsageKeyboardF12)return 0xffbe + (uint32_t)(key.keyCode-UIKeyboardHIDUsageKeyboardF1);
     if(key.keyCode>=UIKeyboardHIDUsageKeyboardF13&&key.keyCode<=UIKeyboardHIDUsageKeyboardF24)return 0xffca + (uint32_t)(key.keyCode-UIKeyboardHIDUsageKeyboardF13);
-    // charactersIgnoringModifiers preserves printable layout information for
-    // Ctrl/Alt shortcuts. Cache the down keysym by HID so releasing Shift first
-    // cannot send a different key-up (A down followed by a up).
+    // Cache the down keysym by HID so releasing Shift first cannot send a
+    // different key-up. Text uses UIKit's actual shifted/layout-aware symbol;
+    // shortcut control codes are mapped back to printable keysyms.
     if(key.keyCode>=UIKeyboardHIDUsageKeyboardLeftControl&&key.keyCode<=UIKeyboardHIDUsageKeyboardRightGUI)return 0;
-    NSString *s=key.charactersIgnoringModifiers;NSData *d=[s dataUsingEncoding:NSUTF32LittleEndianStringEncoding];if(d.length!=4)return 0;
-    uint32_t c;memcpy(&c,d.bytes,4);return c<256?c:0x01000000|c;
+    unsigned modifiers=0;
+    if(key.modifierFlags&UIKeyModifierShift)modifiers|=LR_KEY_SHIFT;
+    if(key.modifierFlags&UIKeyModifierControl)modifiers|=LR_KEY_CONTROL;
+    if(key.modifierFlags&UIKeyModifierAlternate)modifiers|=LR_KEY_ALT;
+    if(key.modifierFlags&UIKeyModifierCommand)modifiers|=LR_KEY_COMMAND;
+    return LRHardwareKeySym(key.characters,key.charactersIgnoringModifiers,modifiers);
 }
 - (void)pressesBegan:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event{
     NSMutableSet *unhandled=[presses mutableCopy];
-    for(UIPress *p in presses)if(p.key){UIKey *key=p.key;_hardwareModifiers=key.modifierFlags;[self syncModifiers];
+    for(UIPress *p in presses)if(p.key){UIKey *key=p.key;_hardwareModifiers=key.modifierFlags;
+        unsigned own=LRModifierForHID((unsigned)key.keyCode);
+        if(own==LR_KEY_SHIFT)_hardwareModifiers|=UIKeyModifierShift;
+        if(own==LR_KEY_CONTROL)_hardwareModifiers|=UIKeyModifierControl;
+        if(own==LR_KEY_ALT)_hardwareModifiers|=UIKeyModifierAlternate;
+        if(own==LR_KEY_COMMAND)_hardwareModifiers|=UIKeyModifierCommand;
+        [self syncModifiers];
+        [self countInput:@"keyboard.hardware.down"];
         uint32_t symbol=[self symbolForKey:key];
         if(symbol){_pressedKeys[@(key.keyCode)]=@(symbol);[_client key:symbol down:YES];}
         [self trace:[NSString stringWithFormat:@"hardware HID=%ld down=1 keysym=0x%08X modifiers=0x%lx",(long)key.keyCode,symbol,(unsigned long)_hardwareModifiers]];
@@ -353,6 +367,7 @@ static NSString *ApplicationPreflightFailure(NSURL *session) {
 - (void)pressesEnded:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event{
     NSMutableSet *unhandled=[presses mutableCopy];
     for(UIPress *p in presses)if(p.key){UIKey *key=p.key;NSNumber *cached=_pressedKeys[@(key.keyCode)];
+        [self countInput:@"keyboard.hardware.up"];
         uint32_t symbol=cached?cached.unsignedIntValue:[self symbolForKey:key];
         if(symbol){[_client key:symbol down:NO];[_pressedKeys removeObjectForKey:@(key.keyCode)];}
         _hardwareModifiers=key.modifierFlags;[self syncModifiers];
@@ -409,7 +424,18 @@ static NSString *ApplicationPreflightFailure(NSURL *session) {
 // Event-to-send latency: iOS event timestamp to the pointer message being queued.
 - (void)sendPointerFromEventTime:(NSTimeInterval)eventTime buttons:(uint8_t)buttons{
     if(!_client)return;
-    static uint8_t previous;if((buttons&~previous)&7)_pressSentAt=CACurrentMediaTime();previous=buttons;
+    uint8_t changed=(buttons^_lastSentPointerButtons)&7;
+    if((buttons&~_lastSentPointerButtons)&7){
+        _pressSentAt=CACurrentMediaTime();
+        // Selecting a Linux window also routes the hardware keyboard to its
+        // native display view. Keep touch-only use behind the Keyboard button.
+        if(GCKeyboard.coalescedKeyboard&&self.window&&!self.isFirstResponder){
+            BOOL focused=[self becomeFirstResponder];
+            [self countInput:focused?@"keyboard.focus.acquired":@"keyboard.focus.failed"];
+        }
+    }
+    for(unsigned bit=1;bit<=4;bit<<=1)if(changed&bit)[self countInput:[NSString stringWithFormat:@"x11.button%u.%@",bit,buttons&bit?@"down":@"up"]];
+    _lastSentPointerButtons=buttons;
     [_client pointerX:_pointerX y:_pointerY buttons:buttons];[self countInput:@"x11.pointer-sent"];
     if(eventTime>0){double ms=(CACurrentMediaTime()-eventTime)*1000;if(ms>=0&&ms<5000){_latencySum+=ms;_latencyCount++;_latencyMax=MAX(_latencyMax,ms);}}
 }
@@ -417,6 +443,7 @@ static NSString *ApplicationPreflightFailure(NSURL *session) {
     LRPointerEnvironment e=[self pointerEnvironment];NSMutableArray *mice=[NSMutableArray new];
     for(GCMouse *m in GCMouse.mice)[mice addObject:m.vendorName?:@"mouse"];
     return @{@"pointer_mode":_pointerModeActive?@"on":@"off",@"mode_setting":@(e.mode),@"assistive_touch":@(e.assistive_touch),@"gc_mice":mice,
+        @"hardware_keyboard":@(GCKeyboard.coalescedKeyboard!=nil),@"keyboard_first_responder":@(self.isFirstResponder),
         @"indirect_pointer_seen":@(_sawIndirectPointer),@"hover_seen":@(_sawHover),@"counts":_inputCounts.copy,@"last_source":_lastInputSource?:@"none",
         @"pointer":[NSString stringWithFormat:@"%u,%u buttons=%u",_pointerX,_pointerY,_mouseButtons|_pointerTouchButton],
         @"press_to_frame_ms":_displayCount?[NSString stringWithFormat:@"avg %.1f max %.1f n=%lu",_displaySum/_displayCount,_displayMax,(unsigned long)_displayCount]:@"none",
@@ -433,7 +460,10 @@ static NSString *ApplicationPreflightFailure(NSURL *session) {
     UITouch *t=touches.anyObject;_lastTouchDown=t.timestamp;
     if(t.type==UITouchTypeIndirectPointer&&!_sawIndirectPointer){_sawIndirectPointer=YES;[self refreshPointerMode];}
     if(_pointerModeActive&&(!_relativeTouchpad||t.type==UITouchTypeIndirectPointer)&&!_pointerTouch&&event.allTouches.count==1&&[self position:[t locationInView:self]]){
-        _pointerTouch=t;_pointerTouchButton=(uint8_t)lr_pointer_touch_button(t.type==UITouchTypeIndirectPointer&&(event.buttonMask&UIEventButtonMaskSecondary));
+        BOOL indirect=t.type==UITouchTypeIndirectPointer;
+        BOOL secondary=indirect&&(event.buttonMask&UIEventButtonMaskSecondary);
+        BOOL ownButton=lr_pointer_use_uikit_button([self pointerEnvironment],indirect,secondary?LR_POINTER_RIGHT:LR_POINTER_LEFT);
+        _pointerTouch=t;_pointerTouchButton=ownButton?(uint8_t)lr_pointer_touch_button(secondary):0;
         [self sendPointerFromEventTime:t.timestamp buttons:_mouseButtons];                      // move first
         [self sendPointerFromEventTime:t.timestamp buttons:_mouseButtons|_pointerTouchButton];  // then press
         return;

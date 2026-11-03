@@ -37,14 +37,20 @@ static inline bool lr_pointer_use_gc_motion(LRPointerEnvironment e) {
     return e.gc_mouse && !e.assistive_touch && !e.indirect_pointer && !e.hover;
 }
 
-// GCMouse buttons: UIKit already delivers every button of an indirect pointer
-// (buttonMask), and AssistiveTouch delivers the left click as a touch. Other
-// buttons (right, middle with AssistiveTouch; all without UIKit pointer) come
-// from GCMouse.
+// Use GCMouse for physical buttons whenever available, independently of the
+// absolute UIKit position source. Detecting an indirect pointer between a
+// button's press and release must not discard the release and leave it held.
+// AssistiveTouch supplies its left click as a direct touch instead.
 static inline bool lr_pointer_use_gc_button(LRPointerEnvironment e, int button) {
-    if (e.indirect_pointer) return false;
     if (button == LR_POINTER_LEFT && e.assistive_touch) return false;
     return e.gc_mouse;
+}
+
+// UIKit remains the button source for fingers/Pencil and pointers that have no
+// GCMouse button stream. One physical click has one owner even when both APIs
+// report it; UIKit still supplies the absolute position in either case.
+static inline bool lr_pointer_use_uikit_button(LRPointerEnvironment e, bool indirect, int button) {
+    return !indirect || !lr_pointer_use_gc_button(e, button);
 }
 
 // X11 button bit for a UIKit touch in pointer mode: secondary button mask maps
