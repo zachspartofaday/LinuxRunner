@@ -1,5 +1,6 @@
 #import "RuntimeBridge.h"
 #include "LinuxAccountPolicy.h"
+#include "DisplayPolicy.h"
 #import "CapturePolicy.h"
 #import "GuestMetalBackend.h"
 #import "FileTransfer.h"
@@ -689,6 +690,24 @@ static NSString *LRJITLastFailure;   // reason of the last refused or failed act
     for(NSString *key in d.dictionaryRepresentation.allKeys)
         if([key hasPrefix:@"LinuxRunnerDesktop.resolution."]&&[d integerForKey:key]==4)[d setInteger:3 forKey:key];
     [d setBool:YES forKey:@"LinuxRunnerDesktop.landscapeDefault.v1"];
+}
++ (NSInteger)desktopResolutionIndex {
+    NSUserDefaults *d=NSUserDefaults.standardUserDefaults;
+    NSString *root=self.activeRootName;
+    NSString *key=[@"LinuxRunnerDesktop.resolution." stringByAppendingString:root];
+    NSString *migration=[@"LinuxRunnerDesktop.steamosIPadFit.v1." stringByAppendingString:root];
+    id saved=[d objectForKey:key];
+    BOOL steamosIPad=self.activeEnvironmentIsSteamOS&&UIDevice.currentDevice.userInterfaceIdiom==UIUserInterfaceIdiomPad;
+    NSInteger choice=lr_desktop_resolution(saved?(int)MAX(0,MIN(4,[saved integerValue])):-1,steamosIPad,[d boolForKey:migration]);
+    if(steamosIPad&&![d boolForKey:migration]) {
+        [d setInteger:choice forKey:key];
+        [d setBool:YES forKey:migration];
+    }
+    return choice;
+}
++ (BOOL)desktopMetalPresentationEnabled {
+    id choice=[NSUserDefaults.standardUserDefaults objectForKey:@"LinuxRunnerDesktop.metalPresentation"];
+    return choice?[choice boolValue]:(self.activeEnvironmentIsSteamOS&&self.virglActive&&UIDevice.currentDevice.userInterfaceIdiom==UIUserInterfaceIdiomPad);
 }
 + (void)prepareExecutionBackendAtLaunch {
     [self migrateDesktopSizeToLandscape];

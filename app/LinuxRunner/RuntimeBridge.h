@@ -81,6 +81,8 @@ void LRSetDatalessMaterialization(void);
 + (void)setExecutionMode:(NSString *)mode;
 + (BOOL)debuggerAttached;
 + (void)setDesktopDisplayWidth:(NSUInteger)width height:(NSUInteger)height;   // KMS preferred mode for the next desktop
++ (NSInteger)desktopResolutionIndex;
++ (BOOL)desktopMetalPresentationEnabled;
 + (NSString *)gpuMode;                     // automatic, metal, software
 + (void)setGPUMode:(NSString *)mode;
 + (NSDictionary *)gpuStatus;                 // mode, active renderer, detail

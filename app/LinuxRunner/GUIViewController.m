@@ -16,6 +16,9 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <time.h>
+#include <sys/resource.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 static double LRGUIClock(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return t.tv_sec+t.tv_nsec*1e-9;}
 
 @interface TerminalViewController (LRGUIProcessStatus)
@@ -193,13 +196,13 @@ static NSString *ApplicationPreflightFailure(NSURL *session) {
     }
 }
 - (void)configurePresentation {
-    if (![NSUserDefaults.standardUserDefaults boolForKey:@"LinuxRunnerDesktop.metalPresentation"]) {
+    if (!LRRuntimeBridge.desktopMetalPresentationEnabled) {
         [_metal removeFromSuperview]; _metal = nil; _image.hidden = _relativeTouchpad;
         if (_latestPixels) [self presentPixels:_latestPixels width:_pixelWidth height:_pixelHeight];
         return;
     }
     if (_metal) return;
-        if ([NSUserDefaults.standardUserDefaults boolForKey:@"LinuxRunnerDesktop.metalPresentation"]) {
+        if (LRRuntimeBridge.desktopMetalPresentationEnabled) {
             __weak typeof(self) weak = self;
             _metal = [[LRMetalFramebufferView alloc] initWithFailure:^(NSString *reason) {
                 typeof(self) self = weak; if (!self) return;
@@ -820,8 +823,10 @@ static NSString *DesktopDegradedNotice(NSString *state);
     if(_surface.latestPixels)[_surface presentPixels:_surface.latestPixels width:_surface.pixelWidth height:_surface.pixelHeight];
     if(_desktopMode)[LRRuntimeBridge desktopTrace:@"02 view" result:@"ok" detail:[NSString stringWithFormat:@"viewDidAppear controller=desktop auto-launch=%d window=%d size=%.0fx%.0f",_autoLaunchPending,self.view.window!=nil,self.view.bounds.size.width,self.view.bounds.size.height]];
     else [LRRuntimeBridge desktopTrace:@"02 view" result:@"info" detail:[NSString stringWithFormat:@"viewDidAppear controller=%@",_launchConfiguration?@"application":@"gui-test"]];
-    if(_autoLaunchPending){_autoLaunchPending=NO;_repairAttempted=NO;[self run:_desktopMode?@"desktop":@"custom"];}
-    if(_desktopMode&&self.view.bounds.size.width>self.view.bounds.size.height){id automatic=[NSUserDefaults.standardUserDefaults objectForKey:@"LinuxRunnerDesktop.autoFullscreen"];if(!automatic||[automatic boolValue])[self setImmersive:YES];}}
+    // Fit measures the framebuffer after the immersive toolbar/nav layout.
+    if(_desktopMode&&self.view.bounds.size.width>self.view.bounds.size.height){id automatic=[NSUserDefaults.standardUserDefaults objectForKey:@"LinuxRunnerDesktop.autoFullscreen"];if(!automatic||[automatic boolValue])[self setImmersive:YES animated:NO];}
+    [self.navigationController.view layoutIfNeeded];[self.view layoutIfNeeded];
+    if(_autoLaunchPending){_autoLaunchPending=NO;_repairAttempted=NO;[self run:_desktopMode?@"desktop":@"custom"];}}
 - (void)viewDidDisappear:(BOOL)animated{
     [super viewDidDisappear:animated];
     // Opening our settings/logs must not detach the retained display transport.
@@ -874,7 +879,7 @@ static NSString *DesktopDegradedNotice(NSString *state);
     [_stack addArrangedSubview:blenderActions];
     UIStackView *browsers=[UIStackView new];browsers.distribution=UIStackViewDistributionFillEqually;
     for(NSArray *item in @[@[@"Install Browser Support",@"installBrowser"],@[@"Run LinuxRunner Browser",@"runBrowser"],@[@"Run Firefox",@"runFirefox"]]){UIButton *b=[UIButton buttonWithType:UIButtonTypeSystem];[b setTitle:item[0] forState:UIControlStateNormal];b.titleLabel.font=[UIFont systemFontOfSize:12];b.titleLabel.numberOfLines=2;b.accessibilityIdentifier=item[0];[b addTarget:self action:NSSelectorFromString(item[1]) forControlEvents:UIControlEventTouchUpInside];[browsers addArrangedSubview:b];}
-    [_stack addArrangedSubview:browsers];_resolution=[[UISegmentedControl alloc] initWithItems:_desktopMode?@[@"640×480",@"800×600",@"1024×768",@"960×540",@"Fit"]:@[@"640×480",@"800×600",@"1024×768"]];_resolution.selectedSegmentIndex=_desktopMode?MAX(0,MIN(4,[NSUserDefaults.standardUserDefaults integerForKey:[@"LinuxRunnerDesktop.resolution." stringByAppendingString:LRRuntimeBridge.activeRootName]])):0;if(_desktopMode&&![NSUserDefaults.standardUserDefaults objectForKey:[@"LinuxRunnerDesktop.resolution." stringByAppendingString:LRRuntimeBridge.activeRootName]])_resolution.selectedSegmentIndex=3;_resolution.accessibilityIdentifier=@"Display resolution";[_stack addArrangedSubview:_resolution];_launchControls=@[actions,apps,mesaActions,blenderActions,browsers,clock,_resolution];_status=[UILabel new];_status.numberOfLines=0;_status.font=[UIFont systemFontOfSize:13];_status.accessibilityIdentifier=@"GUI status";_status.text=@"Install GUI Support in this environment, then open xclock or xterm. Install Qt Support for the Qt test. DISPLAY and authentication are set automatically per session. Debian GUI/browser acceptance requires physical testing.";[_stack addArrangedSubview:_status];
+    [_stack addArrangedSubview:browsers];_resolution=[[UISegmentedControl alloc] initWithItems:_desktopMode?@[@"640×480",@"800×600",@"1024×768",@"960×540",@"Fit"]:@[@"640×480",@"800×600",@"1024×768"]];_resolution.selectedSegmentIndex=_desktopMode?LRRuntimeBridge.desktopResolutionIndex:0;_resolution.accessibilityIdentifier=@"Display resolution";[_stack addArrangedSubview:_resolution];_launchControls=@[actions,apps,mesaActions,blenderActions,browsers,clock,_resolution];_status=[UILabel new];_status.numberOfLines=0;_status.font=[UIFont systemFontOfSize:13];_status.accessibilityIdentifier=@"GUI status";_status.text=@"Install GUI Support in this environment, then open xclock or xterm. Install Qt Support for the Qt test. DISPLAY and authentication are set automatically per session. Debian GUI/browser acceptance requires physical testing.";[_stack addArrangedSubview:_status];
     _surface=[LRFramebufferView new];[_stack addArrangedSubview:_surface];[_surface.heightAnchor constraintGreaterThanOrEqualToConstant:100].active=YES;
     _modifierButtons=[NSMutableArray new];
     UIStackView *toolbar=[UIStackView new];_inputToolbar=toolbar;toolbar.spacing=4;toolbar.distribution=UIStackViewDistributionFillEqually;
@@ -1203,7 +1208,11 @@ static NSString *LRTail(NSURL *url,NSUInteger lines){
     if(DesktopDegradedNotice(state)){[self desktopStartFailed:@"Desktop components could not initialize" detail:DesktopDegradedNotice(state)];return;}
     if(_sessionTerminal.sessionPid<=0||[NSFileManager.defaultManager fileExistsAtPath:[_sessionURL URLByAppendingPathComponent:@"stop"].path]){[self desktopStartFailed:@"The desktop session stopped" detail:@"Details contains the component startup logs. Existing Linux files are preserved."];return;}
     if(-[_profileStarted timeIntervalSinceNow]>240){[_profileTimer invalidate];_profileTimer=nil;
-        [self desktopStartFailed:@"The display did not appear" detail:@"Linux started the desktop session, but no picture arrived within 4 minutes.\n\nError: DISPLAY_INITIALIZATION_ERROR. Tap Retry; Details shows the session log."];}
+        if(_desktopPainted){
+            [self desktopStartFailed:@"The desktop did not finish starting" detail:@"The Linux display connected, but the window manager, panel and desktop surface did not all become ready within 4 minutes.\n\nError: DESKTOP_COMPONENT_INITIALIZATION_ERROR. Details shows the session log."];
+        }else{
+            [self desktopStartFailed:@"The display did not appear" detail:@"Linux started the desktop session, but no picture arrived within 4 minutes.\n\nError: DISPLAY_INITIALIZATION_ERROR. Tap Retry; Details shows the session log."];
+        }}
 }
 - (void)desktopStartFailed:(NSString *)title detail:(NSString *)detail{
     [LRRuntimeBridge desktopTrace:@"failure" result:@"fail" detail:[NSString stringWithFormat:@"%@ | %@",title,[detail stringByReplacingOccurrencesOfString:@"\n" withString:@" "]]];
@@ -1434,10 +1443,10 @@ static NSString *LRSessionGraphicsMode(void){
     _audioPort=0;
     if(LRAudioBridge.enabled){int afd=socket(AF_INET,SOCK_STREAM,0);struct sockaddr_in a2={.sin_family=AF_INET,.sin_port=0};a2.sin_addr.s_addr=htonl(INADDR_LOOPBACK);socklen_t l2=sizeof a2;
         if(afd>=0&&!bind(afd,(struct sockaddr *)&a2,sizeof a2)&&!getsockname(afd,(struct sockaddr *)&a2,&l2)&&ntohs(a2.sin_port)!=port)_audioPort=ntohs(a2.sin_port);if(afd>=0)close(afd);}
-    if(_desktopMode){NSString *key=[@"LinuxRunnerDesktop.resolution." stringByAppendingString:LRRuntimeBridge.activeRootName];id saved=[NSUserDefaults.standardUserDefaults objectForKey:key];_resolution.selectedSegmentIndex=saved?MAX(0,MIN(4,[saved integerValue])):3;}
+    if(_desktopMode)_resolution.selectedSegmentIndex=LRRuntimeBridge.desktopResolutionIndex;
     NSString *geometry=_desktopMode&&_resolution.selectedSegmentIndex==4?[self fitScreenGeometry]:@[@"640x480",@"800x600",@"1024x768",@"960x540"][_resolution.selectedSegmentIndex];
     {unsigned gw=0,gh=0;if(sscanf(geometry.UTF8String,"%ux%u",&gw,&gh)==2)[LRRuntimeBridge setDesktopDisplayWidth:gw height:gh];}   // KMS compositors use exactly this size
-    [LRRuntimeBridge logCategory:@"GUI_SESSION" event:[NSString stringWithFormat:@"root=%@ distribution=%@ geometry=%@ mode=%@ GLX=%@ (server capability; application renderer is independent)",LRRuntimeBridge.activeRootName,[LRRuntimeBridge activeEnvironmentIsDebian]?@"debian":@"alpine",geometry,mode,glxMode]];
+    [LRRuntimeBridge logCategory:@"GUI_SESSION" event:[NSString stringWithFormat:@"root=%@ distribution=%@ geometry=%@ mode=%@ GLX=%@ (server capability; application renderer is independent)",LRRuntimeBridge.activeRootName,LRRuntimeBridge.activeEnvironmentIsSteamOS?@"steamos":[LRRuntimeBridge activeEnvironmentIsDebian]?@"debian":[LRRuntimeBridge activeEnvironmentIsArch]?@"arch":@"alpine",geometry,mode,glxMode]];
     _sessionGuestUser=[LRRuntimeBridge.defaultLinuxUser copy];
     NSString *desktopKey=[@"LinuxRunnerDesktop.environment." stringByAppendingString:LRRuntimeBridge.activeRootName];
     NSString *selectedDesktop=[NSUserDefaults.standardUserDefaults stringForKey:desktopKey];
@@ -1494,13 +1503,15 @@ static NSString *DesktopDegradedNotice(NSString *state){
     NSString *geometry=_sessionURL?[NSString stringWithContentsOfURL:[_sessionURL URLByAppendingPathComponent:@"geometry"] encoding:NSUTF8StringEncoding error:nil]:nil;
     return @{@"state":state,@"alive":@(alive),@"connected":@(_client!=nil),@"geometry":geometry?:@"",@"user":_sessionGuestUser?:@"unknown",@"selectedUser":LRRuntimeBridge.defaultLinuxUser,@"root":LRRuntimeBridge.activeRootName,@"audio":[self audioSummary]};
 }
-// "Fit" desktop size: the window's shape in points (iPad windows, Stage Manager,
+// "Fit" desktop size: the actual viewer's shape in points (iPad windows, Stage Manager,
 // split view and external displays included), scaled up to at least 540 pixels
 // on the short side for usable Linux UIs and capped at 1600x1200 to bound the
 // software-rendering and x11vnc cost. Multiples of 8; session.sh validates it.
 - (NSString *)fitScreenGeometry{
-    UIWindow *target=([self externalOutputActive]?LRCurrentExternalDisplay.view.window:nil)?:self.view.window;   // a connected monitor wins
-    CGSize s=target?target.bounds.size:self.view.bounds.size;
+    UIView *target=[self externalOutputActive]?LRCurrentExternalDisplay.view:_surface;
+    [target layoutIfNeeded];
+    CGSize s=target.bounds.size;
+    if(s.width<1||s.height<1)s=self.view.bounds.size;
     uint16_t W,H;lr_desktop_geometry(s.width,s.height,&W,&H);
     return [NSString stringWithFormat:@"%ux%u",W,H];
 }
@@ -1623,6 +1634,7 @@ static NSString *DesktopDegradedNotice(NSString *state){
         if([desktopState containsString:@"ready=1"]&&_desktopPainted&&_startState==LRStartSession){_startState=LRStartIdle;[self hideStartPanel];[self desktopStartLog:@"stage=painted components=verified"];}
         if(DesktopDegradedNotice(desktopState))progress=DesktopDegradedNotice(desktopState);
         if([desktopState containsString:@"ready=1"]&&_queuedDesktopApplication){NSDictionary *app=_queuedDesktopApplication;_queuedDesktopApplication=nil;[self launchDesktopApplication:app];}}
+    _surface.accessibilityValue=[NSString stringWithFormat:@"%@; framebuffer %ux%u",progress,_surface.pixelWidth,_surface.pixelHeight];
     double now=LRGUIClock();
     if(_rateTime>0&&now-_rateTime>=0.9){_updateRate=(double)(_frames-_rateFrames)/(now-_rateTime);_rateFrames=_frames;_rateTime=now;}
     else if(_rateTime<=0||_frames<_rateFrames){_rateFrames=_frames;_rateTime=now;}
@@ -1633,7 +1645,18 @@ static NSString *DesktopDegradedNotice(NSString *state){
     [self updateStartupStatus];
     [_frameLock lock];uint64_t frames=_frames,bytes=_bytes,patchBytes=_patchBytes,submittedPatchBytes=_presentationPatchBytes;[_frameLock unlock];
     [LRRuntimeBridge logCategory:@"GUI_TRANSPORT" event:[NSString stringWithFormat:@"decoder_patch_bytes=%llu presenter_patch_bytes=%llu frames=%llu",(unsigned long long)patchBytes,(unsigned long long)submittedPatchBytes,(unsigned long long)frames]];
-    [LRRuntimeBridge logCategory:@"GUI" event:[NSString stringWithFormat:@"frames=%llu wire-bytes=%llu elapsed=%.2fs resolution=%ux%u software-rendering",(unsigned long long)frames,(unsigned long long)bytes,-[_startedAt timeIntervalSinceNow],_pendingWidth,_pendingHeight]];
+    [LRRuntimeBridge logCategory:@"GUI" event:[NSString stringWithFormat:@"frames=%llu wire-bytes=%llu elapsed=%.2fs resolution=%ux%u presenter=%@",(unsigned long long)frames,(unsigned long long)bytes,-[_startedAt timeIntervalSinceNow],_pendingWidth,_pendingHeight,_surface.metal?@"Metal":@"Core Graphics"]];
+    if(_desktopMode&&[NSUserDefaults.standardUserDefaults boolForKey:@"LinuxRunnerDesktop.performanceDiagnostics"]){
+        struct rusage usage={0};getrusage(RUSAGE_SELF,&usage);
+        double cpu=(double)usage.ru_utime.tv_sec+usage.ru_utime.tv_usec*1e-6+usage.ru_stime.tv_sec+usage.ru_stime.tv_usec*1e-6;
+        NSDictionary *sample=@{@"monotonic_s":@(LRGUIClock()),@"cpu_s":@(cpu),@"footprint_bytes":@([LRRuntimeBridge appFootprintBytes]),@"thermal_state":@(NSProcessInfo.processInfo.thermalState),@"frames":@(frames),@"framebuffer_pixels":@[@(_surface.pixelWidth),@(_surface.pixelHeight)],@"viewer_points":@[@(_surface.bounds.size.width),@(_surface.bounds.size.height)],@"screen_native_pixels":@[@(_surface.window.screen.nativeBounds.size.width),@(_surface.window.screen.nativeBounds.size.height)],@"screen_scale":@(_surface.window.screen.scale),@"screen_native_scale":@(_surface.window.screen.nativeScale),@"input":[_surface inputDiagnostics],@"presenter":[_surface presentationStatistics]};
+        NSData *data=[NSJSONSerialization dataWithJSONObject:sample options:0 error:nil];
+        if(data){[LRRuntimeBridge logCategory:@"DESKTOP_PERFORMANCE" event:[[NSString alloc]initWithData:data encoding:NSUTF8StringEncoding]];
+            NSURL *url=[_sessionURL URLByAppendingPathComponent:@"performance.jsonl"];
+            int fd=open(url.fileSystemRepresentation,O_WRONLY|O_CREAT|O_APPEND|O_NOFOLLOW,0600);
+            if(fd>=0){struct stat st;if(!fstat(fd,&st)&&S_ISREG(st.st_mode)&&st.st_size<1024*1024){write(fd,data.bytes,data.length);write(fd,"\n",1);}close(fd);}
+        }
+    }
 }
 - (void)stop{
     [_audio stop];_audio=nil;
@@ -1704,7 +1727,8 @@ static NSString *DesktopDegradedNotice(NSString *state){
     _lastLaunchRequest=config[@"requestID"];
     [LRRuntimeBridge logCategory:@"DESKTOP_LAUNCH" event:[NSString stringWithFormat:@"executable=%@ request=%@",executable,target.lastPathComponent]];
 }
-- (void)setImmersive:(BOOL)hide{_inputToolbar.hidden=hide;_status.hidden=hide;_immersiveButton.hidden=!hide;[self.navigationController setNavigationBarHidden:hide animated:YES];[self setNeedsStatusBarAppearanceUpdate];}
+- (void)setImmersive:(BOOL)hide animated:(BOOL)animated{_inputToolbar.hidden=hide;_status.hidden=hide;_immersiveButton.hidden=!hide;[self.navigationController setNavigationBarHidden:hide animated:animated];[self setNeedsStatusBarAppearanceUpdate];}
+- (void)setImmersive:(BOOL)hide{[self setImmersive:hide animated:YES];}
 - (void)toggleImmersive{[self setImmersive:!_inputToolbar.hidden];}
 - (void)viewWillTransitionToSize:(CGSize)size withTransitionCoordinator:(id<UIViewControllerTransitionCoordinator>)coordinator {
     [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
@@ -1727,7 +1751,9 @@ static NSString *DesktopDegradedNotice(NSString *state){
     state[@"screenMaximumRefresh"]=screen?@(screen.maximumFramesPerSecond):@0;
     NSMutableSet *modes=[NSMutableSet new];for(UIScreenMode *mode in screen.availableModes)[modes addObject:[NSString stringWithFormat:@"%.0f × %.0f",mode.size.width,mode.size.height]];
     state[@"screenModes"]=[[modes allObjects] sortedArrayUsingSelector:@selector(compare:)];
-    state[@"displayServer"]=[state[@"alive"] boolValue]?@"X11 / Xvfb":@"No running display";
+    NSString *displayBackend=LRDiagnosticTailString(LRReadDiagnosticTail([_sessionURL URLByAppendingPathComponent:@"display-backend"],64));
+    BOOL acceleratedDisplay=[[displayBackend stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] isEqual:@"xorg-virgl"];
+    state[@"displayServer"]=[state[@"alive"] boolValue]?(acceleratedDisplay?@"X11 / Xorg (virgl)":@"X11 / Xvfb"):@"No running display";
     NSString *readiness=LRDiagnosticTailString(LRReadDiagnosticTail([_sessionURL URLByAppendingPathComponent:@"desktop-state"],8192));
     NSString *environment=@"Not reported";
     for(NSString *line in [readiness componentsSeparatedByString:@"\n"])if([line hasPrefix:@"environment="])environment=[line substringFromIndex:12];
@@ -1738,7 +1764,7 @@ static NSString *DesktopDegradedNotice(NSString *state){
 - (void)performDesktopAction:(NSString *)action {
     if(!NSThread.isMainThread){__weak typeof(self) weak=self;dispatch_async(dispatch_get_main_queue(),^{[weak performDesktopAction:action];});return;}
     if([action isEqual:@"start"]){
-        _resolution.selectedSegmentIndex=MAX(0,MIN(4,[NSUserDefaults.standardUserDefaults objectForKey:[@"LinuxRunnerDesktop.resolution." stringByAppendingString:LRRuntimeBridge.activeRootName]]?[NSUserDefaults.standardUserDefaults integerForKey:[@"LinuxRunnerDesktop.resolution." stringByAppendingString:LRRuntimeBridge.activeRootName]]:3));
+        _resolution.selectedSegmentIndex=LRRuntimeBridge.desktopResolutionIndex;
         if(!_client)[self run:@"desktop"];
     } else if([action isEqual:@"stop"]){_trackpadRequested=NO;[_restartTimer invalidate];_restartTimer=nil;[self stop];[self message:@"Stopping desktop. Saved files remain in Linux."];}
     else if([action isEqual:@"restart"]){
