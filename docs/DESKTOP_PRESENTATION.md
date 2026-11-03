@@ -19,7 +19,7 @@ JSONL samples containing CPU time, footprint, thermal state, frame counts,
 viewer/panel geometry, presenter and input diagnostics. These are diagnostic
 counters, not panel FPS or causal input latency. Local input diagnostics can
 include mouse vendor names; inspect and redact exports before sharing. The
-option is off by default. Xorg/graphics log tails join existing redacted exports.
+option is off by default. Xorg/graphics log collection belongs to the guest graphics PR (#10).
 
 The UI test helpers preserve UIImage orientation during OCR. Reference tests
 require an explicitly named bundle/root; Arch installation requires another
