@@ -68,4 +68,25 @@
 
 }
 
+- (void)testReferenceCapturePerformance {
+    NSDictionary *env=NSProcessInfo.processInfo.environment;
+    NSString *bundle=env[@"LR_REFERENCE_DEVICE_BUNDLE"],*root=env[@"LR_REFERENCE_ROOT"];
+    XCTSkipIf(![env[@"LR_REFERENCE_CAPTURE_PROBE"] isEqual:@"YES"]||!bundle.length||!root.length,@"Requires explicit capture probe, bundle and installed root");
+    self.continueAfterFailure=NO;
+    XCUIDevice.sharedDevice.orientation=UIDeviceOrientationLandscapeLeft;
+    XCUIApplication *app=[[XCUIApplication alloc]initWithBundleIdentifier:bundle];
+    app.launchArguments=@[@"-Default Root",root,@"-LinuxRunnerDesktop.captureProbe",@"YES",@"-LinuxRunnerDesktop.performanceDiagnostics",@"YES",
+        @"-LinuxRunnerGUISharedImages",env[@"LR_REFERENCE_SHARED_IMAGES"]?:@"NO"];
+    [self addTeardownBlock:^{[app terminate];app.launchArguments=@[@"-Default Root",root];[app launch];}];
+    [app launch];
+    if([app.buttons[@"Later"] waitForExistenceWithTimeout:3])[app.buttons[@"Later"] tap];
+    XCUIElement *open=app.buttons[@"Open Desktop"];
+    XCTAssertTrue([open waitForExistenceWithTimeout:60]);[open tap];
+    XCUIElement *surface=[[app descendantsMatchingType:XCUIElementTypeAny] matchingIdentifier:@"Linux GUI surface"].firstMatch;
+    NSPredicate *done=[NSPredicate predicateWithFormat:@"value CONTAINS 'Capture probe complete' OR value CONTAINS 'Capture probe failed'"];
+    XCTAssertEqual([XCTWaiter waitForExpectations:@[[[XCTNSPredicateExpectation alloc]initWithPredicate:done object:surface]] timeout:240],XCTWaiterResultCompleted);
+    XCTAssertTrue([surface.value containsString:@"Capture probe complete"],@"%@",surface.value);
+    XCTAttachment *shot=[XCTAttachment attachmentWithScreenshot:app.screenshot];shot.name=@"Controlled input and repaint capture probe";shot.lifetime=XCTAttachmentLifetimeKeepAlways;[self addAttachment:shot];
+}
+
 @end

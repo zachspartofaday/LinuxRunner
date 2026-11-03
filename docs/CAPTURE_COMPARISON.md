@@ -85,3 +85,9 @@ The [measurement harness](../tests/linuxrunner/gui/capture-probe/README.md)
 retains the exact temporary viewer patch, fixture and host checks. The shipping
 viewer source was restored after measurement; no default was promoted. This
 capture experiment is separate from the storage-scan PRs.
+
+The explicit `testReferenceCapturePerformance` XCTest entry is retained in
+`app/UITests/CaptureCleanupUITests.m`. Ordinary runs skip it. It requires the
+separate measurement-only viewer instrumentation from `capture-probe/` and an
+explicit reference bundle/root plus `LR_REFERENCE_CAPTURE_PROBE=YES`; setting
+the flag in an ordinary build does not install the probe or qualify a result.
