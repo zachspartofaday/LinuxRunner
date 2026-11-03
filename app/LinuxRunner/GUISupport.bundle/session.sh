@@ -166,6 +166,9 @@ export DISPLAY=:$display
 # Debian Mesa needs server GLX for real desktop OpenGL contexts. This is
 # software rendering, independent of optional Metal framebuffer presentation.
 distro=$(sed -n 's/^ID=//p' /etc/os-release | tr -d '"')
+if [ "$distro" = steamos ]; then
+    export QT_STYLE_OVERRIDE=Fusion
+fi
 # Session graphics default chosen in Settings; a launcher's own
 # LR_GUI_GPU_MODE (command.sh) takes precedence for that application.
 gpu_mode=mesa

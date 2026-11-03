@@ -44,7 +44,7 @@
     },
     {
       "name": "desktop-components.sh",
-      "sha256": "70d3176a1d7b0ddc12a4df4906c05f5abaa5d4b3999a4bf66c60dbbb49e0f26c",
+      "sha256": "e53d6e7d7a6bf7a36816e4c4924f97f6c5302eb0bb12d9ffd7aac615a112fcb2",
       "mode": "0755"
     },
     {
@@ -84,7 +84,7 @@
     },
     {
       "name": "desktop-profile.sh",
-      "sha256": "a5ca752fae6083c67680f5d194f2972c54971b982f2f04a4abe0c50bff8699c6",
+      "sha256": "fdec6a4c2523cf7b4c79e9d5156b709fe69675089f7c143877b206a872ce0d9e",
       "mode": "0755"
     },
     {
@@ -384,7 +384,7 @@
     },
     {
       "name": "package-manager.sh",
-      "sha256": "5c038bf464e587f3e98dc4618acba18ade6832baa76409191e30f92fba0fac1c",
+      "sha256": "a9787d2baeb7650e30202974abfa00b10c2a3a726f2b9997f052631dd0645cb6",
       "mode": "0755"
     },
     {
@@ -409,7 +409,7 @@
     },
     {
       "name": "session.sh",
-      "sha256": "7d33bc02a949ae221e24f9bf5861a8fb0238211b3c125d2f1d1a2bb46bd60ba0",
+      "sha256": "45ca703f60f44a6c1681b7e3d44d4333c27ccb2bcc8b53d0c25e5c8a61ea9204",
       "mode": "0755"
     },
     {
@@ -420,6 +420,11 @@
     {
       "name": "share-check.sh",
       "sha256": "ec262147b6c1ece5fd282b574b214764850f8995e7a1531507d0d9a8d5cb93d7",
+      "mode": "0755"
+    },
+    {
+      "name": "steamos-profile.sh",
+      "sha256": "a452f14bf336dfafe5aa92aacfdba7a9a7be02aba0b4691890903c15aa3c2e59",
       "mode": "0755"
     },
     {
