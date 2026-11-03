@@ -55,6 +55,7 @@ void LRSetDatalessMaterialization(void);
 + (BOOL)assembleArchPackages:(NSArray<NSString *> *)packages localNames:(NSArray<NSString *> *)names localDescriptions:(NSArray<NSString *> *)descriptions toArchive:(NSURL *)archive progress:(void (^)(double))progress cancel:(BOOL (^)(void))cancel error:(NSError **)error;
 + (BOOL)importVerifiedEnvironment:(NSURL *)archive root:(NSString *)root sha256:(NSString *)sha256 metadata:(NSDictionary<NSString *, NSString *> *)metadata progress:(void (^)(double, NSString *))progress cancel:(BOOL (^)(void))cancel error:(NSError **)error;
 + (BOOL)activeEnvironmentIsArch;
++ (BOOL)desktopSharedImagesEnabled;
 + (BOOL)activeEnvironmentIsDebian;
 + (NSDictionary *)probeJITPermissions;
 /// Execution backend. The JIT exists only in the JIT-capable build variant and
