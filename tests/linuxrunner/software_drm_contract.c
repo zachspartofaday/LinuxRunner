@@ -38,7 +38,7 @@ static void check(const char *step, int ok) { if (!ok) { printf("DRM_CONTRACT FA
 
 static double now_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1e3 + t.tv_nsec / 1e6; }
 
-static void vblank_events(int fd, uint32_t crtc, const char *node) {
+static void vblank_events(int fd, uint32_t crtc, const char *node, uint32_t alternate_fb) {
     struct queue_sequence q = {.crtc_id = crtc, .flags = 1, .sequence = 10, .user_data = 0x123456789abcdef0ULL};
     double start = now_ms();
     check("queue sequence", ioctl(fd, IOWR(0x3c, sizeof q), &q) == 0);
@@ -76,6 +76,12 @@ static void vblank_events(int fd, uint32_t crtc, const char *node) {
         if (!iteration) {
             q = (struct queue_sequence) {.crtc_id = crtc, .flags = 1, .sequence = 3600};
             check("bounded vblank queue", ioctl(other, IOWR(0x3c, sizeof q), &q) < 0 && errno == EBUSY);
+            struct mode_crtc before = {.crtc_id = crtc}, after = {.crtc_id = crtc};
+            check("read scanout before rejected flip", ioctl(other, IOWR(0xa1, sizeof before), &before) == 0);
+            struct page_flip flip = {.crtc_id = crtc, .fb_id = alternate_fb, .flags = 1, .user_data = 0x55};
+            check("full pending queue rejects event flip", ioctl(other, IOWR(0xb0, sizeof flip), &flip) < 0 && errno == EBUSY);
+            check("rejected flip preserves scanout", ioctl(other, IOWR(0xa1, sizeof after), &after) == 0 && before.fb_id == after.fb_id);
+
         }
         start = now_ms();
         check("cancel future vblank on close", close(other) == 0 && now_ms() - start < 1000);
@@ -120,7 +126,7 @@ static void kms(const char *node) {
     check("CRTC clock without page flips", ioctl(fd, IOWR(0x3b, sizeof after_idle), &after_idle) == 0 &&
           after_idle.sequence >= before.sequence + 3 && after_idle.sequence_ns > before.sequence_ns &&
           after_idle.sequence_ns - before.sequence_ns == (int64_t) (after_idle.sequence - before.sequence) * 16666667);
-    vblank_events(fd, crtc, node);
+    vblank_events(fd, crtc, node, fbid[1]);
     double t0 = now_ms();
     int flips = 0;
     uint32_t last_sequence = (uint32_t) after_idle.sequence;

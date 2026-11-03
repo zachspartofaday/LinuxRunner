@@ -151,7 +151,7 @@ struct drm_file {
     union display_event events[EVENT_QUEUE];
     unsigned event_count;
     struct { uint64_t sequence, user_data; uint32_t type; } pending[EVENT_QUEUE];
-    unsigned pending_count;
+    unsigned pending_count, flip_reservations;
     pthread_t vblank_thread;
     pthread_cond_t vblank_wake;
     bool vblank_started, vblank_stop;
@@ -410,9 +410,7 @@ static void *vblank_worker(void *opaque) {
 #ifdef __APPLE__
         pthread_cond_timedwait_relative_np(&f->vblank_wake, &f->lock.m, &wait);
 #else
-        struct timespec deadline; clock_gettime(CLOCK_REALTIME, &deadline);
-        deadline.tv_sec += wait.tv_sec; deadline.tv_nsec += wait.tv_nsec;
-        if (deadline.tv_nsec >= 1000000000) { deadline.tv_sec++; deadline.tv_nsec -= 1000000000; }
+        struct timespec deadline = {.tv_sec = due / 1000000000, .tv_nsec = due % 1000000000};
         pthread_cond_timedwait(&f->vblank_wake, &f->lock.m, &deadline);
 #endif
         f->lock.owner = pthread_self();
@@ -425,7 +423,7 @@ static int queue_vblank(struct fd *fd, uint64_t sequence, uint64_t user_data, ui
     if (sequence > INT64_MAX / VBLANK_PERIOD_NS) return _EINVAL;
     struct drm_file *f = fd->data;
     lock(&f->lock);
-    if (f->event_count + f->pending_count == EVENT_QUEUE) { unlock(&f->lock); return _EBUSY; }
+    if (f->event_count + f->pending_count + f->flip_reservations >= EVENT_QUEUE) { unlock(&f->lock); return _EBUSY; }
     unsigned n = f->pending_count++;
     f->pending[n].sequence = sequence; f->pending[n].user_data = user_data; f->pending[n].type = type;
     if (!f->vblank_started) {
@@ -572,8 +570,9 @@ static void queue_event(struct fd *fd, struct drm_file *f, uint64_t user_data) {
     struct crtc_sequence sample = vblank_now();
     uint64_t now = (uint64_t) sample.sequence_ns;
     lock(&f->lock);
-    if (f->event_count + f->pending_count < EVENT_QUEUE)
-        f->events[f->event_count++].vblank = (struct vblank_event) {.type = 2 /* FLIP_COMPLETE */, .length = sizeof(struct vblank_event),
+    assert(f->flip_reservations > 0);
+    f->flip_reservations--;
+    f->events[f->event_count++].vblank = (struct vblank_event) {.type = 2 /* FLIP_COMPLETE */, .length = sizeof(struct vblank_event),
             .user_data = user_data, .tv_sec = (uint32_t) (now / 1000000000), .tv_usec = (uint32_t) (now % 1000000000 / 1000),
             .sequence = (uint32_t) sample.sequence, .crtc_id = CRTC_ID};
     unlock(&f->lock);
@@ -587,6 +586,14 @@ static int page_flip(struct fd *fd, struct drm_file *f, struct page_flip *p) {
     uint64_t due = kms.last_flip_ns + VBLANK_PERIOD_NS;
     unlock(&kms.lock);
     if (!ok) return _EINVAL;
+    if (p->flags & 1) {
+        lock(&f->lock);
+        if (f->event_count + f->pending_count + f->flip_reservations >= EVENT_QUEUE) {
+            unlock(&f->lock); return _EBUSY;
+        }
+        f->flip_reservations++;
+        unlock(&f->lock);
+    }
     scanout_sync(p->fb_id);
     // One flip per refresh: the flip completes at the next 60 Hz slot, so a
     // software compositor is paced as by vblank instead of spinning.
@@ -1131,6 +1138,16 @@ static int drm_close(struct fd *fd) {
     return 0;
 }
 
+static void vblank_cond_init(pthread_cond_t *condition) {
+    pthread_condattr_t attributes;
+    pthread_condattr_init(&attributes);
+#ifdef __linux__
+    pthread_condattr_setclock(&attributes, CLOCK_MONOTONIC);
+#endif
+    pthread_cond_init(condition, &attributes);
+    pthread_condattr_destroy(&attributes);
+}
+
 static int drm_open(int major, int minor, struct fd *fd) {
     (void) major;
     if (minor == LR_VIRGL_RENDER_MINOR || minor == LR_VIRGL_CARD_MINOR) {
@@ -1140,7 +1157,7 @@ static int drm_open(int major, int minor, struct fd *fd) {
         struct drm_file *f = calloc(1, sizeof *f);
         if (!f) return _ENOMEM;
         lock_init(&f->lock);
-        pthread_cond_init(&f->vblank_wake, NULL);
+        vblank_cond_init(&f->vblank_wake);
         f->virgl = true;
         f->ctx_id = atomic_fetch_add(&next_virgl_ctx, 1);
         if (minor == LR_VIRGL_CARD_MINOR) pthread_once(&kms_once, kms_init);
@@ -1154,7 +1171,7 @@ static int drm_open(int major, int minor, struct fd *fd) {
     struct drm_file *f = calloc(1, sizeof *f);
     if (!f) return _ENOMEM;
     lock_init(&f->lock);
-    pthread_cond_init(&f->vblank_wake, NULL);
+    vblank_cond_init(&f->vblank_wake);
     fd->data = f;
     return 0;
 }
