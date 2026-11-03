@@ -1,5 +1,6 @@
 #import "RuntimeBridge.h"
 #include "LinuxAccountPolicy.h"
+#include "DisplayPolicy.h"
 #import "GuestMetalBackend.h"
 #import "FileTransfer.h"
 #import "FileArchive.h"
@@ -407,7 +408,7 @@ static NSString *desktopRoot;
     NSMutableArray<NSURL *> *sessions=[NSMutableArray new];
     for(NSURL *child in children){NSNumber *link=nil,*directory=nil;[child getResourceValue:&link forKey:NSURLIsSymbolicLinkKey error:nil];[child getResourceValue:&directory forKey:NSURLIsDirectoryKey error:nil];if([child.lastPathComponent hasPrefix:@"session-"]&&directory.boolValue&&!link.boolValue)[sessions addObject:child];}
     [sessions sortUsingComparator:^NSComparisonResult(NSURL *a,NSURL *b){NSDate *ad=nil,*bd=nil;[a getResourceValue:&ad forKey:NSURLContentModificationDateKey error:nil];[b getResourceValue:&bd forKey:NSURLContentModificationDateKey error:nil];return [(bd?:NSDate.distantPast) compare:ad?:NSDate.distantPast];}];
-    NSDictionary *components=@{@"session.log":@"Session",@"xvfb.log":@"X11",@"display.log":@"Display",@"bus.log":@"D-Bus",@"wm.log":@"Window Manager",@"panel.log":@"Panel",@"desktop.log":@"Desktop",@"plasma.log":@"Plasma",@"application.log":@"Application",@"focus.log":@"Input",@"window.log":@"Windows",@"desktop-state":@"Status"};
+    NSDictionary *components=@{@"session.log":@"Session",@"xvfb.log":@"X11",@"xorg.log":@"Xorg",@"graphics.log":@"Graphics",@"display.log":@"Display",@"bus.log":@"D-Bus",@"wm.log":@"Window Manager",@"panel.log":@"Panel",@"desktop.log":@"Desktop",@"plasma.log":@"Plasma",@"application.log":@"Application",@"focus.log":@"Input",@"window.log":@"Windows",@"desktop-state":@"Status"};
     for(NSURL *session in [sessions subarrayWithRange:NSMakeRange(0,MIN(sessions.count,3))]) {
         for(NSString *name in [components.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
             NSURL *url=[session URLByAppendingPathComponent:name];
@@ -689,6 +690,24 @@ static NSString *LRJITLastFailure;   // reason of the last refused or failed act
         if([key hasPrefix:@"LinuxRunnerDesktop.resolution."]&&[d integerForKey:key]==4)[d setInteger:3 forKey:key];
     [d setBool:YES forKey:@"LinuxRunnerDesktop.landscapeDefault.v1"];
 }
++ (NSInteger)desktopResolutionIndex {
+    NSUserDefaults *d=NSUserDefaults.standardUserDefaults;
+    NSString *root=self.activeRootName;
+    NSString *key=[@"LinuxRunnerDesktop.resolution." stringByAppendingString:root];
+    NSString *migration=[@"LinuxRunnerDesktop.steamosIPadFit.v1." stringByAppendingString:root];
+    id saved=[d objectForKey:key];
+    BOOL steamosIPad=self.activeEnvironmentIsSteamOS&&UIDevice.currentDevice.userInterfaceIdiom==UIUserInterfaceIdiomPad;
+    NSInteger choice=lr_desktop_resolution(saved?(int)MAX(0,MIN(4,[saved integerValue])):-1,steamosIPad,[d boolForKey:migration]);
+    if(steamosIPad&&![d boolForKey:migration]) {
+        [d setInteger:choice forKey:key];
+        [d setBool:YES forKey:migration];
+    }
+    return choice;
+}
++ (BOOL)desktopMetalPresentationEnabled {
+    id choice=[NSUserDefaults.standardUserDefaults objectForKey:@"LinuxRunnerDesktop.metalPresentation"];
+    return choice?[choice boolValue]:(self.activeEnvironmentIsSteamOS&&self.virglActive&&UIDevice.currentDevice.userInterfaceIdiom==UIUserInterfaceIdiomPad);
+}
 + (void)prepareExecutionBackendAtLaunch {
     [self migrateDesktopSizeToLandscape];
     static dispatch_once_t observe;
@@ -753,6 +772,10 @@ static NSString *LRJITLastFailure;   // reason of the last refused or failed act
     for(NSDictionary *e in catalog[@"environments"])if([e[@"rootfsName"] isEqual:self.activeRootName])return [e[@"distributionID"] isEqual:@"arch"];
     NSDictionary *installation=[NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfURL:[[self rootURL:self.activeRootName] URLByAppendingPathComponent:@"environment-install.json"]]?:[NSData data] options:0 error:nil];
     return [installation[@"distributionID"] isEqual:@"arch"];
+}
++ (BOOL)activeEnvironmentIsSteamOS {
+    NSDictionary *installation=[NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfURL:[[self rootURL:self.activeRootName] URLByAppendingPathComponent:@"environment-install.json"]]?:[NSData data] options:0 error:nil];
+    return [installation[@"distributionID"] isEqual:@"steamos"];
 }
 + (BOOL)importVerifiedEnvironment:(NSURL *)archive root:(NSString *)root sha256:(NSString *)sha256 progress:(void (^)(double,NSString *))progress cancel:(BOOL (^)(void))cancel error:(NSError **)error {
     LRInstallProgress *reporter=[LRInstallProgress new];reporter.progress=progress;reporter.cancel=cancel;
@@ -1582,7 +1605,7 @@ static void LRDesktopTraceAppend(NSString *line) {
         NSMutableArray<NSURL *> *sessions=[NSMutableArray new];
         for(NSURL *u in children)if([u.lastPathComponent hasPrefix:@"session-"]){NSNumber *link=nil;[u getResourceValue:&link forKey:NSURLIsSymbolicLinkKey error:nil];if(!link.boolValue)[sessions addObject:u];}
         [sessions sortUsingComparator:^NSComparisonResult(NSURL *a,NSURL *b){NSDate *ad=nil,*bd=nil;[a getResourceValue:&ad forKey:NSURLContentModificationDateKey error:nil];[b getResourceValue:&bd forKey:NSURLContentModificationDateKey error:nil];return [(bd?:NSDate.distantPast) compare:(ad?:NSDate.distantPast)];}];
-        for(NSURL *session in [sessions subarrayWithRange:NSMakeRange(0,MIN(sessions.count,3))])for(NSString *name in @[@"session.log",@"application.log",@"focus.log",@"window.log",@"display.log",@"xvfb.log",@"bus.log",@"window-state",@"wm.log",@"panel.log",@"desktop.log",@"plasma.log",@"xfconf.log",@"desktop-state"]){
+        for(NSURL *session in [sessions subarrayWithRange:NSMakeRange(0,MIN(sessions.count,3))])for(NSString *name in @[@"session.log",@"application.log",@"focus.log",@"window.log",@"display.log",@"xvfb.log",@"xorg.log",@"graphics.log",@"bus.log",@"window-state",@"wm.log",@"panel.log",@"desktop.log",@"plasma.log",@"xfconf.log",@"desktop-state"]){
             NSURL *url=[session URLByAppendingPathComponent:name];int fd=open(url.fileSystemRepresentation,O_RDONLY|O_NOFOLLOW);if(fd<0)continue;struct stat st;if(fstat(fd,&st)||!S_ISREG(st.st_mode)){close(fd);continue;}
             off_t offset=st.st_size>1024*1024?st.st_size-1024*1024:0;NSMutableData *data=[NSMutableData dataWithLength:st.st_size-offset];ssize_t n=pread(fd,data.mutableBytes,data.length,offset);close(fd);if(n<0)continue;data.length=n;
             NSString *text=[[NSString alloc]initWithData:data encoding:NSUTF8StringEncoding]?:@"non-UTF8 application output omitted";

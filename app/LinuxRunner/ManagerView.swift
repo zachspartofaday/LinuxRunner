@@ -1701,7 +1701,7 @@ private struct DesktopLogsScreen: View {
 private struct DesktopPreferencesView: View {
     @State private var resolution = 3
     @AppStorage("LinuxRunnerDesktop.autoFullscreen") private var autoFullscreen = true
-    @AppStorage("LinuxRunnerDesktop.metalPresentation") private var metalPresentation = false
+    @State private var metalPresentation = false
     private var key: String { "LinuxRunnerDesktop.resolution." + LRRuntimeBridge.activeRootName() }
     var body: some View { Form {
         Section("Next Desktop Start") {
@@ -1715,10 +1715,10 @@ private struct DesktopPreferencesView: View {
         }
         Section("Framebuffer Presentation") {
             Toggle("Metal Presentation · Experimental", isOn: $metalPresentation)
-            Text("Applies when reopening the viewer. Presents the received framebuffer through Metal, with Core Graphics fallback. Linux applications still use software rendering and the ARM64 interpreter. Physical-device performance has not yet been verified.").font(.caption)
+            Text("Applies when reopening the viewer. Presents received display updates through Metal, with Core Graphics fallback. Enabled by default for SteamOS on iPad when the Linux Metal GPU is active. The Linux GPU and execution engine are selected separately in Settings › Graphics.").font(.caption)
         }
         Section("Execution") { Text("ARM64 interpreter; JIT is not required. The renderer for Linux applications is chosen in Settings › Graphics.").font(.caption) }
-    }.navigationTitle("Display & Gestures").onAppear { resolution = UserDefaults.standard.object(forKey: key) == nil ? 3 : min(4, max(0, UserDefaults.standard.integer(forKey: key))) }.onChange(of: resolution) { UserDefaults.standard.set($0, forKey: key) } }
+    }.navigationTitle("Display & Gestures").onAppear { resolution = LRRuntimeBridge.desktopResolutionIndex(); metalPresentation = LRRuntimeBridge.desktopMetalPresentationEnabled() }.onChange(of: resolution) { UserDefaults.standard.set($0, forKey: key) }.onChange(of: metalPresentation) { UserDefaults.standard.set($0, forKey: "LinuxRunnerDesktop.metalPresentation") } }
 }
 /// Graphics renderer for Linux applications, plus live evidence of what actually ran on the GPU.
 // Folders the user picks in Files (iPhone, iCloud Drive, other providers or an
