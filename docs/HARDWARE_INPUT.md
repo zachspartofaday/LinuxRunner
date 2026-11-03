@@ -6,8 +6,8 @@ key-down symbol. A modifier's own key-down updates its state immediately.
 
 UIKit owns targeted indirect-pointer clicks on iPad, including a Magic Keyboard
 that exposes GC movement without button delivery. GC button presence is not
-inferred from mouse presence. Relative-only GC presses require a visible, focused,
-unobscured framebuffer target; an owned release is forwarded even after a source
+inferred from mouse presence. Relative-only GC presses require a visible, unobscured
+framebuffer target independently of existing keyboard focus; an owned release is forwarded even after a source
 or presentation transition. Button history remains per viewer.
 
 Host policy checks cover modifiers/layouts, source transitions and pointer
