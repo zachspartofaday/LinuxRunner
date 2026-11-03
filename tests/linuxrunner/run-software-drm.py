@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Run the DRM contract with a fresh host interpreter and disposable guest root.
+Build the interpreter with -Dvdso_required=true for guest signal return.
 
 Requires Zig for a static ARM64 Linux test executable and a fakefsify tool.
 """

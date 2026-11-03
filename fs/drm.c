@@ -436,6 +436,30 @@ static int queue_vblank(struct fd *fd, uint64_t sequence, uint64_t user_data, ui
     return 0;
 }
 
+// Match the kernel's guest-aware sleep protocol: a pending guest signal can
+// outlive its host SIGUSR1 notification, so host nanosleep alone is insufficient.
+static int wait_vblank_deadline(uint64_t due) {
+    cond_t condition;
+    lock_t mutex;
+    cond_init(&condition);
+    lock_init(&mutex);
+    int error = 0;
+    lock(&mutex);
+    for (;;) {
+        uint64_t now = monotonic_ns();
+        if (now >= due) break;
+        uint64_t remaining = due - now;
+        struct timespec wait = {.tv_sec = remaining / 1000000000, .tv_nsec = remaining % 1000000000};
+        int result = wait_for(&condition, &mutex, &wait);
+        if (result < 0 && result != _ETIMEDOUT) { error = result; break; }
+        // Blocked signals and spurious wakeups must not complete the wait early.
+    }
+    unlock(&mutex);
+    cond_destroy(&condition);
+    pthread_mutex_destroy(&mutex.m);
+    return error;
+}
+
 static int wait_vblank(struct fd *fd, union wait_vblank *v) {
     uint32_t type = v->request.type;
     if (type & ~(1U | 0x04000000U | 0x10000000U)) return _EINVAL;
@@ -449,11 +473,8 @@ static int wait_vblank(struct fd *fd, union wait_vblank *v) {
         if (!err) v->reply.sequence = (uint32_t) target;
         return err;
     }
-    uint64_t now = monotonic_ns(), due = target * VBLANK_PERIOD_NS;
-    if (due > now) {
-        struct timespec wait = {.tv_sec = (due - now) / 1000000000, .tv_nsec = (due - now) % 1000000000};
-        if (nanosleep(&wait, NULL)) return errno_map();
-    }
+    int error = wait_vblank_deadline(target * VBLANK_PERIOD_NS);
+    if (error) return error;
     sample = vblank_now();
     v->reply.sequence = (uint32_t) sample.sequence;
     v->reply.sec = sample.sequence_ns / 1000000000;

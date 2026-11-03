@@ -14,7 +14,7 @@ deadlines use CLOCK_MONOTONIC, avoiding wall-clock adjustments. Unsupported flag
 This is a synthetic virtual display clock, not physical-panel synchronization.
 
 Validation on Apple Silicon macOS: a freshly built ARM64 interpreter (JIT off)
-ran the current `software_drm_contract.c` as a static musl executable in a
+with its real ARM64 vDSO ran the current `software_drm_contract.c` as a static musl executable in a
 minimal disposable root. The contract checks advancing idle sequence, async
 poll/read payloads, synchronous pacing, invalid flags/overflow, queue capacity,
 16 close-before-deadline cycles, and existing dumb-buffer/PRIME/KMS behavior.
@@ -34,3 +34,9 @@ archive importing itself is not the subject of this test.
 The Linux monotonic-condition branch was source-reviewed on this macOS host;
 a live Linux wall-clock adjustment was not performed. The contract additionally
 fills the pending queue, rejects a flip with EBUSY and verifies unchanged scanout.
+
+Synchronous waits now use the kernel guest-signal-aware condition protocol,
+recomputing the remaining monotonic deadline after wakeups. A pending guest
+signal returns EINTR even if its host notification arrived before sleeping.
+Eight guest fork/signal/wait cycles verify interruption of a five-second vblank
+deadline and prompt child reaping in the host interpreter.

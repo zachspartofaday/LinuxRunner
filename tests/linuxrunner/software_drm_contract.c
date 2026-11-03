@@ -9,6 +9,8 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <poll.h>
+#include <signal.h>
+#include <sys/wait.h>
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
@@ -37,6 +39,28 @@ static int fails;
 static void check(const char *step, int ok) { if (!ok) { printf("DRM_CONTRACT FAIL %s errno=%d (%s)\n", step, errno, strerror(errno)); fails++; } }
 
 static double now_ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1e3 + t.tv_nsec / 1e6; }
+
+static volatile sig_atomic_t received_signal;
+static void note_signal(int signal) { (void)signal; received_signal = 1; }
+static void vblank_signal_waits(int fd) {
+    struct sigaction action = {.sa_handler = note_signal}, original;
+    sigemptyset(&action.sa_mask);
+    check("vblank signal handler", sigaction(SIGUSR1, &action, &original) == 0);
+    for (unsigned i = 0; i < 8; i++) {
+        received_signal = 0;
+        pid_t parent = getpid(), child = fork();
+        check("vblank signal sender", child >= 0);
+        if (child < 0) break;
+        if (!child) { struct timespec delay = {.tv_nsec = 20000000}; nanosleep(&delay, NULL); kill(parent, SIGUSR1); _exit(0); }
+        union wait_vblank wait = {.request = {.type = 1, .sequence = 300}};
+        double start = now_ms();
+        int result = ioctl(fd, IOWR(0x3a, sizeof wait), &wait), error = errno;
+        check("vblank signal interrupts deadline", result < 0 && error == EINTR && received_signal && now_ms() - start < 1000);
+        int status;
+        check("vblank signal child reaped", waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0);
+    }
+    check("restore vblank signal handler", sigaction(SIGUSR1, &original, NULL) == 0);
+}
 
 static void vblank_events(int fd, uint32_t crtc, const char *node, uint32_t alternate_fb) {
     struct queue_sequence q = {.crtc_id = crtc, .flags = 1, .sequence = 10, .user_data = 0x123456789abcdef0ULL};
@@ -127,6 +151,7 @@ static void kms(const char *node) {
           after_idle.sequence >= before.sequence + 3 && after_idle.sequence_ns > before.sequence_ns &&
           after_idle.sequence_ns - before.sequence_ns == (int64_t) (after_idle.sequence - before.sequence) * 16666667);
     vblank_events(fd, crtc, node, fbid[1]);
+    vblank_signal_waits(fd);
     double t0 = now_ms();
     int flips = 0;
     uint32_t last_sequence = (uint32_t) after_idle.sequence;
