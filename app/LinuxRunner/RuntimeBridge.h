@@ -57,6 +57,7 @@ void LRSetDatalessMaterialization(void);
 + (BOOL)activeEnvironmentIsArch;
 + (BOOL)desktopSharedImagesEnabled;
 + (BOOL)activeEnvironmentIsDebian;
++ (BOOL)activeEnvironmentIsSteamOS;
 + (NSDictionary *)probeJITPermissions;
 /// Execution backend. The JIT exists only in the JIT-capable build variant and
 /// runs only after iOS grants executable memory (an attached debugger such as

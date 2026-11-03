@@ -762,6 +762,10 @@ static NSString *LRJITLastFailure;   // reason of the last refused or failed act
     NSDictionary *installation=[NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfURL:[[self rootURL:self.activeRootName] URLByAppendingPathComponent:@"environment-install.json"]]?:[NSData data] options:0 error:nil];
     return [installation[@"distributionID"] isEqual:@"arch"];
 }
++ (BOOL)activeEnvironmentIsSteamOS {
+    NSDictionary *installation=[NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfURL:[[self rootURL:self.activeRootName] URLByAppendingPathComponent:@"environment-install.json"]]?:[NSData data] options:0 error:nil];
+    return [installation[@"distributionID"] isEqual:@"steamos"];
+}
 + (BOOL)importVerifiedEnvironment:(NSURL *)archive root:(NSString *)root sha256:(NSString *)sha256 progress:(void (^)(double,NSString *))progress cancel:(BOOL (^)(void))cancel error:(NSError **)error {
     LRInstallProgress *reporter=[LRInstallProgress new];reporter.progress=progress;reporter.cancel=cancel;
     return [Roots.instance importVerifiedRootFromArchive:archive name:root sha256:sha256 metadata:@{@"distributionID":@"debian",@"distribution":@"Debian GNU/Linux",@"version":@"13.7",@"packageManager":@"apt",@"defaultShell":@"/bin/bash"} error:error progressReporter:reporter];
@@ -1122,7 +1126,7 @@ static NSArray<NSString *> *LRLoginCommand(NSString *name, NSError **error) {
     // locking and duplicate-name checks are authoritative, not this UI list.
     NSString *passwd=LRAccountTool(@[@"/usr/bin/passwd", @"/bin/passwd"]);
     // shadow's useradd on glibc distributions (Debian, Arch Linux ARM); BusyBox adduser on Alpine.
-    NSString *create=LRAccountTool(self.activeEnvironmentIsDebian || self.activeEnvironmentIsArch ? @[@"/usr/sbin/useradd", @"/usr/bin/useradd"] : @[@"/usr/sbin/adduser", @"/sbin/adduser", @"/usr/bin/adduser", @"/bin/adduser"]);
+    NSString *create=LRAccountTool(self.activeEnvironmentIsDebian || self.activeEnvironmentIsArch || self.activeEnvironmentIsSteamOS ? @[@"/usr/sbin/useradd", @"/usr/bin/useradd"] : @[@"/usr/sbin/adduser", @"/sbin/adduser", @"/usr/bin/adduser", @"/bin/adduser"]);
     if (!passwd || !create) { if(error)*error=lrError(ENOENT, @"Account tools are not installed yet. Use Create Account in Linux Users; it installs them automatically."); return nil; }
     // Administrator: the distribution's sudo group (sudo on Debian, wheel on
     // Alpine); sudo then asks for the user's own password.
@@ -1130,12 +1134,12 @@ static NSArray<NSString *> *LRLoginCommand(NSString *name, NSError **error) {
     if (administrator) {
         if (!self.canGrantAdministrator) { if(error)*error=lrError(ENOENT, @"sudo is not installed in this environment; install it first, or create the user without administrator access."); return nil; }
         grant=self.activeEnvironmentIsDebian ? @" && { getent group sudo >/dev/null || groupadd --system sudo; } && usermod -aG sudo -- \"$1\"" :
-            self.activeEnvironmentIsArch ? @" && { getent group wheel >/dev/null || groupadd --system wheel; } && usermod -aG wheel -- \"$1\""
+            (self.activeEnvironmentIsArch || self.activeEnvironmentIsSteamOS) ? @" && { getent group wheel >/dev/null || groupadd --system wheel; } && usermod -aG wheel -- \"$1\""
              " && { [ -e /etc/sudoers.d/linuxrunner-wheel ] || { mkdir -p /etc/sudoers.d && printf '%%wheel ALL=(ALL:ALL) ALL\\n' > /etc/sudoers.d/linuxrunner-wheel && chmod 0440 /etc/sudoers.d/linuxrunner-wheel; }; }" :
             @" && { getent group wheel >/dev/null || addgroup -S wheel; } && addgroup \"$1\" wheel"
              " && { [ -e /etc/sudoers.d/linuxrunner-wheel ] || { mkdir -p /etc/sudoers.d && printf '%%wheel ALL=(ALL:ALL) ALL\\n' > /etc/sudoers.d/linuxrunner-wheel && chmod 0440 /etc/sudoers.d/linuxrunner-wheel; }; }";
     }
-    NSString *script=[NSString stringWithFormat:self.activeEnvironmentIsDebian || self.activeEnvironmentIsArch ?
+    NSString *script=[NSString stringWithFormat:self.activeEnvironmentIsDebian || self.activeEnvironmentIsArch || self.activeEnvironmentIsSteamOS ?
         @"\"$2\" --create-home --shell /bin/bash -- \"$1\"%@ && exec \"$3\" \"$1\"" :
         @"\"$2\" -D -h \"/home/$1\" -s /bin/sh \"$1\"%@ && exec \"$3\" \"$1\"", grant];
     return [self terminalForCommand:@[@"/bin/sh", @"-c", script, @"linuxrunner-create-user", name, create, passwd] directory:@"/"];
@@ -1177,7 +1181,7 @@ static void LRWaitForProcess(TerminalViewController *process, NSTimeInterval tim
     char salt[17], hash[160];
     if (lr_random_salt(salt) || lr_sha512_crypt(password.UTF8String, salt, hash, sizeof hash)) { completion(lrError(EIO, @"The password could not be prepared.")); return; }
     NSString *hashed = @(hash); memset(hash, 0, sizeof hash);
-    BOOL debian = self.activeEnvironmentIsDebian, arch = self.activeEnvironmentIsArch;
+    BOOL debian = self.activeEnvironmentIsDebian, arch = self.activeEnvironmentIsArch || self.activeEnvironmentIsSteamOS;
     void (^create)(void) = ^{
         progress(@"Creating your account");
         NSString *grant = !administrator ? @"" : debian ?
@@ -1429,7 +1433,7 @@ static NSCountedSet<NSString *> *LRAwakeSet;
         if(error)*error=lrError(EPERM,@"System accounts and the default login cannot be removed. Select a different default login first.");
         return nil;
     }
-    BOOL shadow = self.activeEnvironmentIsDebian || self.activeEnvironmentIsArch;
+    BOOL shadow = self.activeEnvironmentIsDebian || self.activeEnvironmentIsArch || self.activeEnvironmentIsSteamOS;
     NSString *remove = LRAccountTool(shadow ? @[@"/usr/sbin/userdel", @"/usr/bin/userdel"] :
         @[@"/usr/sbin/deluser", @"/sbin/deluser", @"/usr/bin/deluser", @"/bin/deluser"]);
     if (!remove) { if(error)*error=lrError(ENOENT,@"The distribution's account-removal tool is missing. Install it using Package Center."); return nil; }

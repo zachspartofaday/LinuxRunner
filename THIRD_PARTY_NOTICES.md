@@ -58,4 +58,15 @@ from copied source files; upstream checkouts stay unchanged. Retain those
 modifications and the pinned dependency sources with corresponding-source
 distributions.
 
+The optional local SteamFrame image experiment preserves SteamOS and its
+packages under their respective terms; the image is not included in the IPA.
+Device preparation adds Arch Linux ARM x11vnc 0.9.17 and libvncserver 0.9.15
+(GPL-2.0-family terms, with per-file notices). Their upstream sources are
+https://github.com/LibVNC/x11vnc/tree/0.9.17 and
+https://github.com/LibVNC/libvncserver/tree/LibVNCServer-0.9.15.
+The exact package hashes and helper build steps are retained in
+`tools/steamos/prepare-device-image.py`. LinuxRunner's added guest helper
+sources remain in `app/LinuxRunner/GUISupport.bundle`. Preserve component
+notices and corresponding source when sharing any prepared guest image.
+
 The application source, build scripts and dependency revisions are retained in the repository. [SOURCE_ORIGIN.txt](SOURCE_ORIGIN.txt) records the release lineage and exact dependency commits. Submodule contents are not included in GitHub's automatic source archives; initialize the pinned submodules when building from a clone. Source-distribution requirements for bundled binaries apply separately from the licenses of packages downloaded later by users. The release source asset must include the matching application snapshot, pinned build dependencies, graphics source/patches, matching Alpine recipes and checksum-verified inputs, and matching Ghostty Web/Ghostty source. The unchanged bundled Alpine root archive can use the already retained matching source inputs. Preserve the complete notices asset alongside the IPA.
