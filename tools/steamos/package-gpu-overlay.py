@@ -29,6 +29,28 @@ def digest(path):
     return h.hexdigest()
 
 
+def probe_source_bytes():
+    """Preferred source may come from the separate host GPU PR or this archive."""
+    source = REPO / 'tests/linuxrunner/gpu/virgl_border_contract.c'
+    if source.is_file():
+        return source.read_bytes()
+    bundle = REPO / 'app/LinuxRunner/GUISupport.bundle'
+    archive = bundle / 'steamos-gpu.tar.gz'
+    expected = (bundle / 'steamos-gpu.sha256').read_text().split()[0]
+    if digest(archive) != expected:
+        raise ValueError('Bundled overlay checksum mismatch; cannot recover preferred probe source')
+    with tarfile.open(archive, 'r:gz') as tar:
+        name = 'steamos-gpu/share/linuxrunner/virgl_border_contract.c'
+        member = tar.getmember(name)
+        if not member.isfile() or member.size > 1024 * 1024:
+            raise ValueError('Invalid bundled preferred probe source')
+        data = tar.extractfile(member).read()
+        build = json.load(tar.extractfile('steamos-gpu/BUILD.json'))
+        if hashlib.sha256(data).hexdigest() != build['probeSourceSHA256']:
+            raise ValueError('Bundled probe source identity mismatch')
+        return data
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--stage', type=Path, required=True)
@@ -59,15 +81,15 @@ def main():
         (prefix / 'bin/graphics-check').chmod(0o755)
         probe_sources = prefix / 'share/linuxrunner'
         probe_sources.mkdir()
-        probe_source = REPO / 'tests/linuxrunner/gpu/virgl_border_contract.c'
-        shutil.copy2(probe_source, probe_sources / probe_source.name)
+        probe_source = probe_source_bytes()
+        (probe_sources / 'virgl_border_contract.c').write_bytes(probe_source)
         for name in ['LICENSE.md', 'LICENSE.IOS']:
             shutil.copy2(REPO / name, probe_sources / name)
         provenance = {
             'schema': 1, 'architecture': 'aarch64', 'sourceImageSHA256': SOURCE_PIN,
             'mesa': {'revision': MESA_REV, 'source': 'https://gitlab.freedesktop.org/mesa/mesa.git'},
             'prefix': '/opt/linuxrunner/steamos-gpu', 'glibc': '2.39',
-            'probeSourceSHA256': digest(probe_source),
+            'probeSourceSHA256': hashlib.sha256(probe_source).hexdigest(),
             'options': {'gallium-drivers': 'virgl', 'vulkan-drivers': '', 'llvm': 'disabled',
                         'platforms': 'x11,wayland', 'glx': 'dri', 'glvnd': 'enabled', 'egl': 'enabled', 'gbm': 'enabled'},
         }

@@ -162,6 +162,11 @@ python3 tools/steamos/package-gpu-overlay.py \
   --output build/steamos-device/gpu-package --bundle
 ```
 
+The packager uses the standalone probe source when the host GPU prerequisite
+is present. In this scoped checkout it can recover the same preferred source
+from the checksum-verified bundled overlay, checking its BUILD.json identity.
+A refusal to modify custom tags-worker paths is nonfatal to desktop startup.
+
 The output directory must be new. The packager checks architecture and
 symlinks, retains licenses/source identity, normalizes archive metadata, and
 regenerates the GUI resource manifest. `steamos-gpu.sh` verifies and stages

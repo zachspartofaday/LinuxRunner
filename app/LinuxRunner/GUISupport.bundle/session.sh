@@ -59,7 +59,7 @@ if [ "$(id -u)" = 0 ] && [ "$guest_user" != root ]; then
     fi
     if [ "$mode" = desktop ] && [ "$kms_desktop" = plasma ] &&
         [ "$(sed -n 's/^ID=//p' /etc/os-release | tr -d '\"')" = steamos ]; then
-        /bin/sh ./steamos-desktop.sh tags-policy "$guest_user"
+        /bin/sh ./steamos-desktop.sh tags-policy "$guest_user" || echo 'STEAMOS_TAGS: optional workaround unavailable; custom paths preserved, desktop startup continues'
         rm -f /dev/dri/card0 /dev/dri/renderD128
         mkdir -p /dev/dri
         [ -c /dev/dri/card1 ] || mknod -m 660 /dev/dri/card1 c 226 1
