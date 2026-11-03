@@ -1,5 +1,15 @@
 # SteamOS ARM64 userspace experiment
 
+> Scope: this PR adds SteamOS Xorg/Metal, scaled-display font defaults and the
+> reversible tags-worker workaround on top of installer PR #8. It requires the
+> virtual DRM timing (#6) and host Metal sampler (#7) fixes at runtime. Native
+> viewer geometry/presentation (#9), input (#4), socket paths (#3), storage (#1)
+> and capture policy/cleanup (#2) remain separate. Retained device observations
+> below describe the earlier integration; they do not qualify this extracted
+> branch. Historical opt-in/leak discussion predates #2, which resolves the
+> exercised cleanup paths and proposes a guarded default. See that PR for the
+> current policy and its limits. No new performance claim is made by this split.
+
 The supplied SteamFrame repair image runs a terminal and an X11 KDE Plasma
 desktop in LinuxRunner on a physical iPad running iPadOS 27.2, after initial
 validation in the macOS ARM64 host runtime. The app offers an experimental
@@ -88,13 +98,266 @@ services still report missing system bus, FUSE, PipeWire and polkit integration;
 the desktop result does not qualify those services or long-running interactive
 use.
 
-## Scope and dependencies
+## Software-renderer notification
 
-This installer PR is based on the verified-import PR (#5); it does not include
-the separate keyboard, socket, virtual DRM, capture or Metal sampler changes.
-The software Plasma profile is the baseline. Graphics and display enhancements
-are reviewed separately. Prior physical observations above refer to the local
-integration, not an independent installation of this extracted branch.
+The verified V7 iPad build uses software rendering, so Plasma's **Software
+Renderer In Use** notification is expected there. The new GPU candidate adds
+an opt-in path under **Settings → Graphics → Linux GPU Device → GPU → Metal
+GPU · Experimental**. Force-close and reopen LinuxRunner after changing it,
+then open the existing desktop. No rootfs reinstall is needed.
+
+The candidate uses Xorg modesetting/glamor and Qt Quick OpenGL on virgl/Metal.
+KWin window effects remain disabled: its compositor does not yet finish
+initializing reliably in this environment. This does not qualify games,
+Vulkan, arbitrary OpenGL applications or every border-color mode. The Linux
+application renderer picker and Metal framebuffer presentation are separate
+controls; neither replaces the Linux GPU Device setting.
+
+### Reusing the Arch GPU stack
+
+SteamOS reuses the repository's virtual DRM/KMS device, Mesa virgl driver,
+host virglrenderer and ANGLE Metal backend. The current Arch Linux ARM Mesa
+package (`1:26.2.6-1`) requires `GLIBC_2.43`; this image supplies glibc 2.39.
+Installing that package or replacing glibc is not a compatible driver update.
+
+Instead, Mesa 26.3 development revision
+`590bf21d918c86908d96d1f4590ecd25b9657171` was cross-compiled against the
+image's headers and libraries, with prefix `/opt/linuxrunner/steamos-gpu`.
+System Mesa remains unchanged. The Meson options are:
+
+```text
+--prefix=/opt/linuxrunner/steamos-gpu --libdir=lib --buildtype=release
+-Dgallium-drivers=virgl -Dvulkan-drivers= -Dplatforms=x11,wayland
+-Dglx=dri -Dglvnd=enabled -Degl=enabled -Dgbm=enabled -Dllvm=disabled
+-Dgallium-va=disabled -Dgallium-rusticl=false -Dgles1=disabled -Dgles2=enabled
+-Dbuild-tests=false -Dtools= -Dvideo-codecs= -Dvalgrind=disabled -Dlibunwind=disabled
+```
+
+Use an AArch64 Linux cross toolchain, matching Wayland 1.26 scanner, LLVM
+archiver and the image's glibc 2.39/GCC 15.1.1 sysroot. Apple `ar` does not
+produce suitable ELF archive indexes. The local experiment's generated
+cross file and compiler wrappers are under `build/steamos-gpu-deps`; its
+configure arguments are retained in `build/steamos-device/mesa-configure-input.json`.
+Never build against the host macOS SDK or newer Arch libraries.
+
+The host bridge implements transparent-zero sampler borders using Metal's
+clamp-to-zero. ANGLE keeps the full GLES border-color extension unadvertised;
+virglrenderer explicitly rejects unsupported nonzero borders. The host also
+resets its GL context before embedder operations to protect guest framebuffer
+state. Virtual CRTC time advances at 60 Hz independently of page flips, and
+modern/legacy vblank events wake Xorg/Present asynchronously. Event queues are
+bounded, and closing a file cancels and joins its event worker.
+
+### Package and validate an update
+
+Build the pinned host/iOS dependencies as described in `BUILDING.md`. Build
+`tests/linuxrunner/gpu/virgl_border_contract.c` against the image's sysroot
+with `-lEGL -lGLESv2 -lgbm`, then package Mesa's staged prefix:
+
+```sh
+python3 tools/steamos/package-gpu-overlay.py \
+  --stage build/steamos-device/gpu-stage/opt/linuxrunner/steamos-gpu \
+  --mesa-source build/steamos-gpu-deps/mesa \
+  --probe build/steamos-device/gpu-probe/virgl-border-contract \
+  --output build/steamos-device/gpu-package --bundle
+```
+
+The packager uses the standalone probe source when the host GPU prerequisite
+is present. In this scoped checkout it can recover the same preferred source
+from the checksum-verified bundled overlay, checking its BUILD.json identity.
+A refusal to modify custom tags-worker paths is nonfatal to desktop startup.
+
+The output directory must be new. The packager checks architecture and
+symlinks, retains licenses/source identity, normalizes archive metadata, and
+regenerates the GUI resource manifest. `steamos-gpu.sh` verifies and stages
+this overlay before publishing the isolated prefix. Existing installations
+receive it on the next GPU desktop start. Missing GPU support or a failed
+startup pixel check selects the established software desktop.
+
+Each GPU desktop start records the renderer and seven RGBA border/filtering
+comparisons in `graphics.log` before starting Xorg. `xorg.log` records the
+actual glamor driver. GUI diagnostic exports include both files. Select
+Software Rendering and restart LinuxRunner to return to the software path.
+
+The macOS ARM64 host checks pass for:
+
+- All four existing `virgl_render_contract.c` pixel comparisons.
+- Seven transparent-border pixel comparisons, including filtered edges and
+  mixed wrap modes, plus rejection of unsupported nonzero sampler borders.
+- CRTC time without flips, asynchronous modern/legacy events, queue bounds,
+  cancellation on close and the existing KMS/PRIME contract.
+- The packaged driver installation, Xorg/Qt renderer identity, visible KDE
+  panel and desktop, Konsole launch and fresh RFB keyboard output.
+- Shift punctuation/case (`1!Aa?A`) through Konsole, including releasing Shift
+  before the letter key. `keyboard_policy_test.m` also checks layout-aware
+  text, Caps Lock, Control/Shift and Option shortcut mapping.
+
+The GPU-capable V8 app was built, signed, installed and launched on the
+connected M4 iPad using MobileBuildMCP 2.7.1, with JIT disabled. The physical
+startup log identifies virgl/ANGLE on the Apple M4 GPU, all seven startup pixel
+comparisons pass, and Xorg reports the accelerated backend. The operator
+confirmed the desktop looks correct and Magic Keyboard Shift produces `!`
+and `A`. KWin effects remain disabled. The previously verified V7 software
+app is retained locally for rollback.
+
+### Resolution and performance follow-up
+
+The same iPad reported a 1566 × 975 point viewer with a fixed 960 × 540 Linux
+desktop. SteamOS on iPad now defaults to Fit Screen, measured from the actual
+viewer after immersive layout. The old Wide default is migrated once for this
+environment; subsequent explicit choices and other distributions are retained.
+Fit uses logical points with the existing 1600 × 1200 cap, not Retina pixels.
+Changing guest resolution still requires stopping and starting the desktop.
+
+For SteamOS with the Linux GPU active, the viewer defaults to its existing
+Metal presenter unless the user has explicitly chosen Core Graphics. It
+uploads accumulated damage to reusable textures rather than taking a complete
+Core Graphics framebuffer snapshot for each update. The existing single-thread
+adaptive x11vnc policy reduces capture delays during recent input while retaining
+25 ms idle polling. The threaded input mode remains opt-in because it previously
+failed browser text-integrity checks.
+
+A physical Time Profiler recording also identified `StorageUsage.bytes` under
+`EnvironmentManager.refresh` as 57.5% of running CPU samples in its captured
+interval. The retained dSYM UUID is `7AAD93F0-A52E-3F15-A9B4-94D01271185C`;
+the profile's main return address establishes image base `0x104888000`.
+`atos` resolves the hot native frames to the storage walk and manager refresh.
+The manager now cancels a running storage walk when a graphical viewer opens,
+defers automatic storage refresh until it closes. Complete cached storage totals remain visible; cancelled
+walks never publish partial or zero totals. Cancellation is checked between
+files, and generation checks prevent an old task overwriting a newer scan.
+The full Storage settings measurement remains available on request.
+
+The prepared SteamOS profile also defaults Linux PowerDevil and the polkit
+agent out of autostart, preserving explicit account overrides. iPadOS provides
+the host's power/brightness/authentication; this environment lacks the Linux
+system bus those agents repeatedly query. These changes are candidates for
+physical performance measurement, not a claim of a particular FPS improvement.
+
+KIO 6.14 unconditionally enumerates `tags:/` when its worker is installed, even
+with Baloo indexing disabled. Disabling the daemon/config alone therefore did
+not prevent the recurring error. For accounts using the managed Baloo-off
+default, `steamos-desktop.sh` retains `tags.so` under
+`/opt/linuxrunner/steamos-disabled-plugins`, outside Qt's plugin search path.
+It does not delete the plugin or an index. An explicit account autostart
+override restores the saved worker at next desktop start. To restore it manually,
+temporarily run `sh steamos-desktop.sh restore-tags` as root from the managed support directory.
+Unrecognized replacement copies and symlinks are left untouched.
+
+The opt-in `LinuxRunnerDesktop.performanceDiagnostics` launch preference writes
+bounded session-local `performance.jsonl`: monotonic time, process CPU time,
+physical memory footprint, thermal category, received updates, presenter counters
+and aggregate input latency. It records no typed content. The focused XCTest
+`testSteamOSDeviceDesktopPerformance` requires explicit bundle/root environment
+variables and exercises the existing desktop through real device UI automation.
+It does not import or reinstall Linux.
+
+The V9 and storage-only V11 physical UI runs both passed desktop readiness, real touch/text
+input into Konsole, and visible `LR_PERF_aarch64` output. The final iPad session
+used a 1560 × 1112 guest framebuffer for a 1566 × 1119 point viewer, selected
+Metal presentation and adaptive capture, passed all seven GPU pixel checks,
+and had no `tags:/` errors in its Plasma log.
+
+In the paired native metrics snapshots 30–60 seconds after session metrics
+began, before scripted interaction, process CPU use was 122.3% of one core
+with the background storage scan and 37.2% after cancellation. The paired 30-second windows
+had nominal thermal state and at most one display update. This is one paired
+quiet-window measurement of process CPU, not a desktop FPS or sustained
+performance claim. The earlier CPU trace independently identifies the storage
+walk. The final app's framebuffer upload CPU time remains a component counter,
+not an end-to-end display measurement.
+
+The controlled macOS Xlib fixture also completed 30 click/repaint samples per
+policy: legacy median 91.9 ms, adaptive 26.7 ms (p95 94.8 and 79.7 ms). This
+measures Linux input through native RFB decode at 640 × 480; it excludes physical
+UIKit and GPU completion and does not establish SteamOS desktop FPS.
+
+### Verified GPU, capture and text follow-up
+
+A fresh physical iPad audit identifies `ANGLE Metal Renderer: Apple M4 GPU` in
+both Xorg's enabled glamor backend and Plasma's QRhi/OpenGL context. All seven
+startup GPU pixel checks pass. This establishes accelerated rendering for those
+components; KWin effects remain off and guest CPU instructions are interpreted.
+
+The panel is **2732 × 2048**, while this session renders a **1560 × 1112** Linux
+framebuffer in a **1566 × 1119 point** viewer. iPadOS reports backing scale 2 and
+native scale 1.7181208053691275. The app's screenshot/backing resolution therefore
+differs from the physical panel. Fit Screen's logical-point size/cap is a
+LinuxRunner policy, not a headset display setting. Full native-resolution/DPI
+rendering is not implemented by this follow-up; it requires a larger guest
+framebuffer and more capture/rendering work.
+
+The same-binary socket/shared-image comparison passed physical desktop readiness,
+Konsole, `aarch64`, synthesized input and a bounded terminal repaint workload.
+x11vnc's startup framebuffer-read calibration increased from **31 to 1226 MB/s**
+with shared images. That is a component check, not a desktop FPS or sustained
+bandwidth result. Shared capture alone used **40.8% versus 38.1% of one CPU core**
+in the retained paired quiet window. Only two touch events were measured per run,
+so the result does not establish an interaction-latency improvement.
+
+SysV shared-image capture remains explicitly opt-in through the existing X11
+shared-images switch. The independent review found that x11vnc marks successful
+segments for deletion during cleanup; a forced `SIGKILL` skips that cleanup and
+can retain their backing resources until the LinuxRunner app process exits.
+Session-owned crash cleanup has not been qualified, so no distribution receives
+an automatic shared-capture default. Existing explicit choices are preserved.
+After a forcibly terminated shared-capture session, fully restart LinuxRunner
+before retrying; restarting the desktop alone does not reclaim orphan segments.
+
+The established adaptive timing is retained; the slower idle policy did not
+establish better interaction. A short device profile still found substantial
+Xorg/x11vnc interpreter activity; native Metal presentation upload CPU time was
+small in these runs. The evidence does not isolate X11 control-message costs or
+justify replacing their transport with a custom shared-memory command queue.
+Such a queue would still need ordering, wakeups, ownership and crash recovery.
+
+The font audit found Noto Sans/Noto Sans Mono and standard RGB subpixel
+antialiasing at 96 DPI. The managed SteamOS default now chooses grayscale
+antialiasing (`Xft.rgba: none`) for this scaled/rotatable virtual display.
+`steamos-fonts.sh` uses KConfig, preserves explicit account subpixel preferences
+and custom configuration paths, and cannot prevent desktop startup on failure.
+This avoids assuming a fixed RGB stripe layout through scaling; subjective text
+clarity and a full native-resolution desktop remain separate questions.
+
+[Allowlisted measurements and limits](../tests/linuxrunner/steamos/graphics-followup-2026-11-02.json)
+retain the paired counters and binary UUID without raw device/account logs.
+`test_steamos_font_defaults.py` verifies defaults and preservation behavior;
+`test_desktop_configuration.py` checks existing configurations and shell syntax.
+The focused physical UI test has explicit capture overrides for comparisons and
+an optional short smoke mode, which omits the quiet-window measurement.
+The pre-review build passed that physical smoke test through completed 30-line
+terminal output, with its then-default shared capture, adaptive timing, grayscale
+fonts, and Xorg/Plasma M4 renderer identity confirmed again. Those receipts are
+retained as historical validation of that candidate, not of a default promotion.
+The review correction restores opt-in capture; a subsequent physical SteamOS
+startup reached desktop readiness with `shared-images=off`, adaptive timing and
+grayscale fonts. The final post-Arch short test also passed Konsole input,
+`aarch64` and the completed 30-line repaint workload with capture off and no
+launch override. Xorg/Plasma again identified the M4, and all seven GPU pixel
+checks passed. The font audit found `Xft.rgba: none`; this existing account's
+explicit key was preserved. Six font-default checks and thirteen existing
+desktop-configuration/shell-syntax checks passed on the host. The installed
+root filesystem was reused throughout.
+
+The [supported Arch reference](ARCH_REFERENCE.md) is now installed and passes
+basic desktop/xterm input qualification too. Its D-Bus startup exposed a native
+Unix-socket backing-path limit, corrected independently of the graphics policy.
+Arch uses its existing lightweight software desktop at 960 × 540, so this is a
+regression reference rather than a matched Plasma graphics benchmark.
+
+A subsequent [controlled active capture comparison](CAPTURE_COMPARISON.md)
+measured 30 click and 30 keyboard responses per mode, plus numbered full-screen
+repaints, on both Arch and SteamOS. Shared capture improved those native
+submission timings and delivered more distinct repaints. These are synthetic
+capture-path measurements, with a recorded thermal-state difference in the
+SteamOS shared run; GPU completion and physical panel latency remain unmeasured.
+The known forced-exit resource lifetime still keeps shared capture opt-in.
+
+Further performance work should measure sustained real-application workloads
+and native/panel presentation separately. The host GPU bridge currently waits
+for completion after each command submission; changing that requires real
+asynchronous fence and DRM wait semantics, rather than removing correctness
+barriers. KWin effects and game compatibility remain outside this result.
 
 ## Networking
 

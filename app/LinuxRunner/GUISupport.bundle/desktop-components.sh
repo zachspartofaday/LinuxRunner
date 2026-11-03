@@ -59,8 +59,14 @@ if [ "$environment" = plasma ]; then
  plasma_config="${XDG_CONFIG_HOME:-$HOME/.config}"
  if [ "$(sed -n 's/^ID=//p' /etc/os-release | tr -d '\"')" = steamos ]; then
   export KWIN_COMPOSE=N
-  export QT_XCB_GL_INTEGRATION=none QT_QUICK_BACKEND=software QT_OPENGL=software
+  if [ "${LR_STEAMOS_GPU:-0}" = 1 ]; then
+   unset QT_QUICK_BACKEND QT_OPENGL LIBGL_ALWAYS_SOFTWARE
+   export QT_XCB_GL_INTEGRATION=xcb_egl QSG_RHI_BACKEND=opengl QSG_RHI_GL_USE_GLES=1
+  else
+   export QT_XCB_GL_INTEGRATION=none QT_QUICK_BACKEND=software QT_OPENGL=software
+  fi
   mkdir -p "$plasma_config/autostart"
+  /bin/sh ./steamos-fonts.sh || echo 'STEAMOS_FONTS: optional default unavailable; desktop startup continues'
   if [ ! -e "$plasma_config/startkderc" ] && [ ! -L "$plasma_config/startkderc" ]; then
    printf '[General]\nsystemdBoot=false\n' > "$plasma_config/startkderc"
   fi

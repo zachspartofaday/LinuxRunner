@@ -54,7 +54,7 @@
     },
     {
       "name": "desktop-components.sh",
-      "sha256": "e53d6e7d7a6bf7a36816e4c4924f97f6c5302eb0bb12d9ffd7aac615a112fcb2",
+      "sha256": "e93681d904bc1b4a9e1d05913e7a0dd68fbdf7ae19b959fe6c5e8c2fc83abf3f",
       "mode": "0755"
     },
     {
@@ -419,7 +419,7 @@
     },
     {
       "name": "session.sh",
-      "sha256": "4d6cb2a7e580075b95c9a5f08d0ab7509759b43b767b26e30a6a1c55339653c0",
+      "sha256": "8bef047a6ce05926279e117a2891bbe70768b45e93389f87452a85dd5e7ae3f3",
       "mode": "0755"
     },
     {
@@ -433,9 +433,39 @@
       "mode": "0755"
     },
     {
+      "name": "steamos-desktop.sh",
+      "sha256": "3ee3207de0ed50a8fd4bc73d80c2212e8404af0ae0a7b8f58c47b8e1f2123395",
+      "mode": "0755"
+    },
+    {
+      "name": "steamos-fonts.sh",
+      "sha256": "8bef9c042344898913611bc8ed9b6d8e4f8b38aa9dfc450f8173a52bd8e3ca3c",
+      "mode": "0755"
+    },
+    {
+      "name": "steamos-gpu.sh",
+      "sha256": "972ff733f32ecf278044b5b072d84165ee5abae9dfab1abf897f091627f51102",
+      "mode": "0755"
+    },
+    {
+      "name": "steamos-gpu.sha256",
+      "sha256": "ca61604c4811a024ef02659f8656a36326bc8f5502887f02d1d61b6d60a2db00",
+      "mode": "0644"
+    },
+    {
+      "name": "steamos-gpu.tar.gz",
+      "sha256": "735a6caf4059821f61c71b09f7c99c9d9f05ec9bd473311fd299d36c54b6fe94",
+      "mode": "0644"
+    },
+    {
       "name": "steamos-profile.sh",
       "sha256": "a452f14bf336dfafe5aa92aacfdba7a9a7be02aba0b4691890903c15aa3c2e59",
       "mode": "0755"
+    },
+    {
+      "name": "steamos-xorg.conf",
+      "sha256": "cc9c4f032d48cb50bcd28ef7aa9fa4e5ffe4c6c9ca085109ffc0400a08e6f9ea",
+      "mode": "0644"
     },
     {
       "name": "support-common.sh",
