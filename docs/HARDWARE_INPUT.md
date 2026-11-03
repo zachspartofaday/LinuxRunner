@@ -4,11 +4,11 @@ Hardware Shift now uses UIKit's actual layout-aware printable character while
 Control/Option/Command shortcuts retain printable X11 keysyms. Key-up reuses the
 key-down symbol. A modifier's own key-down updates its state immediately.
 
-UIKit remains the source of Magic Keyboard primary trackpad clicks when
-GameController exposes movement but no primary-button callback. Policies avoid
-duplicate clicks when GameController supplies that button. Clicking a Linux
-window acquires native keyboard focus when a hardware keyboard is attached.
-Pointer-button history is per viewer and release resets it.
+UIKit owns targeted indirect-pointer clicks on iPad, including a Magic Keyboard
+that exposes GC movement without button delivery. GC button presence is not
+inferred from mouse presence. Relative-only GC presses require a visible, focused,
+unobscured framebuffer target; an owned release is forwarded even after a source
+or presentation transition. Button history remains per viewer.
 
 Host policy checks cover modifiers/layouts, source transitions and pointer
 button ownership. These checks do not synthesize real Magic Keyboard hardware.

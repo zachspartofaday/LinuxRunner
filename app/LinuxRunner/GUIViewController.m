@@ -407,7 +407,8 @@ static NSString *ApplicationPreflightFailure(NSURL *session) {
 - (LRPointerEnvironment)pointerEnvironment{
     NSString *mode=[NSUserDefaults.standardUserDefaults stringForKey:@"LinuxRunnerInput.mouseMode"];
     return (LRPointerEnvironment){.mode=[mode isEqual:@"touch"]?LR_MOUSE_MODE_TOUCH:[mode isEqual:@"pointer"]?LR_MOUSE_MODE_POINTER:LR_MOUSE_MODE_AUTO,
-        .assistive_touch=UIAccessibilityIsAssistiveTouchRunning(),.gc_mouse=GCMouse.mice.count>0,.indirect_pointer=_sawIndirectPointer,.hover=_sawHover};
+        .assistive_touch=UIAccessibilityIsAssistiveTouchRunning(),.gc_mouse=GCMouse.mice.count>0,.indirect_pointer=_sawIndirectPointer,.hover=_sawHover,
+        .uikit_pointer_platform=UIDevice.currentDevice.userInterfaceIdiom==UIUserInterfaceIdiomPad};
 }
 // Pointer mode: single-finger gestures off (no tap/long-press delays); a touch
 // is a mouse button press at its exact position. Two-finger scroll and zoom stay.
@@ -494,9 +495,26 @@ static NSString *ApplicationPreflightFailure(NSURL *session) {
     if(_pointerTouch&&[touches containsObject:_pointerTouch]){[self endPointerTouch:_pointerTouch];return;}
     [super touchesCancelled:touches withEvent:event];
 }
+- (BOOL)gcPressTargetsSurface {
+    if(!self.window.isKeyWindow||self.hidden||!self.isFirstResponder||!_pixelWidth||!_pixelHeight)return NO;
+    // Global GC callbacks must not click through a native settings sheet.
+    for(UIResponder *r=self.nextResponder;r;r=r.nextResponder)if([r isKindOfClass:UIViewController.class]){
+        UIViewController *controller=(UIViewController *)r;
+        if(controller.presentedViewController||controller.isBeingDismissed)return NO;
+    }
+    CGRect image=_image.frame;
+    CGPoint point=CGPointMake(image.origin.x+(CGFloat)_pointerX/_pixelWidth*image.size.width,
+                             image.origin.y+(CGFloat)_pointerY/_pixelHeight*image.size.height);
+    if(!CGRectContainsPoint(self.bounds,point))return NO;
+    UIView *hit=[self.window hitTest:[self convertPoint:point toView:self.window] withEvent:nil];
+    return hit==self||[hit isDescendantOfView:self];
+}
 - (void)gcButton:(int)button bit:(uint8_t)bit pressed:(BOOL)pressed{
     [self countInput:[NSString stringWithFormat:@"gc.button%d.%@",button,pressed?@"down":@"up"]];
-    if(!lr_pointer_use_gc_button([self pointerEnvironment],button)){[self countInput:@"gc.button.ignored-uikit-delivers"];return;}
+    if(!lr_pointer_forward_gc_button([self pointerEnvironment],button,pressed,(_mouseButtons&bit)!=0,
+                                    pressed?[self gcPressTargetsSurface]:NO)){
+        [self countInput:@"gc.button.ignored-uikit-or-native-target"];return;
+    }
     [self mouseButton:bit pressed:pressed];
 }
 - (void)sendMouse{if(_pixelWidth&&_pixelHeight)[self sendPointerFromEventTime:GCMouse.current.mouseInput.lastEventTimestamp buttons:_mouseButtons|_pointerTouchButton];}
