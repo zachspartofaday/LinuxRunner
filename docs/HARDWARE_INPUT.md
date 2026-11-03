@@ -14,3 +14,7 @@ Host policy checks cover modifiers/layouts, source transitions and pointer
 button ownership. These checks do not synthesize real Magic Keyboard hardware.
 Earlier manual integration use reported working clicks, typing and Shift; a
 standalone physical-device qualification is not claimed by this extraction.
+
+Shifted shortcuts retain UIKit's layout-derived printable character, including
+Option/Command combinations. Missing Shift text is not reconstructed through a
+US punctuation table; Control's encoded ASCII punctuation is decoded directly.
