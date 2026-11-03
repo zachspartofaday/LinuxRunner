@@ -6,6 +6,22 @@ import AVFoundation
 import Network
 import Darwin
 
+// One process-wide gate: scenes and desktop File Sharing own separate managers.
+// Each native viewer owns a token, including while its external transport is
+// retained after dismissal. Releasing one viewer cannot unpause another one.
+@MainActor @objc(LRGraphicalActivity) final class GraphicalActivity: NSObject {
+    @objc static let shared = GraphicalActivity()
+    @Published private(set) var active = false
+    private var sources = Set<UUID>()
+
+    @objc(setActive:forSource:) func setActive(_ active: Bool, forSource source: UUID) {
+        if active { sources.insert(source) } else { sources.remove(source) }
+        let next = !sources.isEmpty
+        if next != self.active { self.active = next }
+    }
+}
+
+
 @MainActor final class EnvironmentManager: ObservableObject {
     @Published var environments: [LinuxEnvironment] = []
     @Published var storage: [UUID: Int64] = [:]
@@ -19,6 +35,10 @@ import Darwin
     @Published var logs: [String] = []
     private var lastStorageMeasurement = Date.distantPast
     private var measuringStorage = false
+    private var storageMeasurement: Task<Void, Never>?
+    private var storageGeneration = UUID()
+    private var graphicalForeground = false
+    private var graphicalActivityObserver: AnyCancellable?
     private var catalogWritable = true
     private var observers: [NSObjectProtocol] = []
 
@@ -42,14 +62,18 @@ import Darwin
             if let index = environments.firstIndex(where: { $0.rootfsName == LRRuntimeBridge.activeRootName() }), LRRuntimeBridge.isRunning() {
                 environments[index].lastBootedAt = Date()
             }
+            storage = Dictionary(uniqueKeysWithValues: environments.compactMap { environment in
+                environment.storageBytes.map { (environment.id, $0) }
+            })
             try persist()
         } catch { catalogWritable = false; self.error = error.localizedDescription }
         observers.append(NotificationCenter.default.addObserver(forName: NSNotification.Name("ProcessExitedNotification"), object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         })
+        graphicalActivityObserver = GraphicalActivity.shared.$active.sink { [weak self] in self?.setGraphicalForeground($0) }
         refresh()
     }
-    deinit { observers.forEach(NotificationCenter.default.removeObserver) }
+    deinit { storageMeasurement?.cancel(); observers.forEach(NotificationCenter.default.removeObserver) }
     func persist() throws {
         guard catalogWritable else { throw EnvironmentError.invalidMetadata }
         try EnvironmentCatalog(environments: environments).write(LRRuntimeBridge.catalogURL())
@@ -88,16 +112,28 @@ import Darwin
             }
         }
         logs = LRRuntimeBridge.logLines()
-        guard !measuringStorage, Date().timeIntervalSince(lastStorageMeasurement) >= 30 else { return }; measuringStorage = true
-        lastStorageMeasurement = Date()
+        // A rootfs can contain hundreds of thousands of files. Its storage
+        // accounting must not compete with an interactive Linux GUI.
+        guard !graphicalForeground, !measuringStorage, Date().timeIntervalSince(lastStorageMeasurement) >= 30 else { return }; measuringStorage = true
         let items = environments.map { ($0.id, LRRuntimeBridge.rootURL($0.rootfsName), LRRuntimeBridge.exchangeURL($0.rootfsName)) }
-        Task.detached(priority: .utility) { [weak self] in
-            let measured = EnvironmentStorage.measure(items)
-            await self?.setStorage(measured)
+        let generation = storageGeneration
+        storageMeasurement = Task.detached(priority: .background) { [weak self] in
+            guard let measured = EnvironmentStorage.measure(items), !Task.isCancelled else { return }
+            await self?.setStorage(measured, generation: generation)
         }
     }
-    private func setStorage(_ measured: [UUID: Int64]) {
-        storage = measured; measuringStorage = false
+    private func setGraphicalForeground(_ active: Bool) {
+        guard active != graphicalForeground else { return }
+        graphicalForeground = active
+        if active {
+            storageGeneration = UUID()
+            storageMeasurement?.cancel(); storageMeasurement = nil; measuringStorage = false
+        } else { refresh() }
+    }
+    private func setStorage(_ measured: [UUID: Int64], generation: UUID) {
+        guard generation == storageGeneration, !graphicalForeground else { return }
+        storage = measured; measuringStorage = false; storageMeasurement = nil
+        lastStorageMeasurement = Date()
         for index in environments.indices {
             environments[index].storageBytes = measured[environments[index].id]
             if active(environments[index]) {
@@ -155,11 +191,12 @@ import Darwin
 }
 
 private enum EnvironmentStorage {
-    static func measure(_ items: [(UUID, URL, URL)]) -> [UUID: Int64] {
+    static func measure(_ items: [(UUID, URL, URL)]) -> [UUID: Int64]? {
         var sizes: [UUID: Int64] = [:]
         for (id, root, exchange) in items {
-            let size = StorageUsage.bytes(root) + StorageUsage.bytes(exchange)
-            sizes[id] = size
+            guard let rootSize = StorageUsage.measuredBytes(root, isCancelled: { Task.isCancelled }),
+                  let exchangeSize = StorageUsage.measuredBytes(exchange, isCancelled: { Task.isCancelled }) else { return nil }
+            sizes[id] = rootSize + exchangeSize
         }
         return sizes
     }
