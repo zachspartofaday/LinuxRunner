@@ -21,6 +21,7 @@ typedef struct {
     bool gc_mouse;            // a GCMouse is connected
     bool indirect_pointer;    // an indirect-pointer touch has been seen (iPad-style pointer)
     bool hover;               // UIKit hover events have been seen
+    bool uikit_pointer_platform; // iPad supplies targeted indirect-pointer clicks
 } LRPointerEnvironment;
 
 // Pointer mode: one touch is the mouse (press on touch-down, move, release on
@@ -37,20 +38,24 @@ static inline bool lr_pointer_use_gc_motion(LRPointerEnvironment e) {
     return e.gc_mouse && !e.assistive_touch && !e.indirect_pointer && !e.hover;
 }
 
-// Use GCMouse for physical buttons whenever available, independently of the
-// absolute UIKit position source. Detecting an indirect pointer between a
-// button's press and release must not discard the release and leave it held.
-// AssistiveTouch supplies its left click as a direct touch instead.
+// Presence does not prove a working button stream. UIKit owns absolute-pointer
+// clicks (including iPad Magic Keyboard); GC owns only a relative-only pointer.
 static inline bool lr_pointer_use_gc_button(LRPointerEnvironment e, int button) {
+    if (e.uikit_pointer_platform || e.indirect_pointer || e.hover) return false;
     if (button == LR_POINTER_LEFT && e.assistive_touch) return false;
     return e.gc_mouse;
 }
 
-// UIKit remains the button source for fingers/Pencil and pointers that have no
-// GCMouse button stream. One physical click has one owner even when both APIs
-// report it; UIKit still supplies the absolute position in either case.
 static inline bool lr_pointer_use_uikit_button(LRPointerEnvironment e, bool indirect, int button) {
-    return !indirect || !lr_pointer_use_gc_button(e, button);
+    (void)e; (void)indirect; (void)button;
+    return true;
+}
+
+// Releases belong to the source that accepted the press, even if pointer
+// detection or native presentation changes before that release arrives.
+static inline bool lr_pointer_forward_gc_button(LRPointerEnvironment e, int button,
+        bool pressed, bool owned, bool targeted) {
+    return pressed ? targeted && lr_pointer_use_gc_button(e, button) : owned;
 }
 
 // X11 button bit for a UIKit touch in pointer mode: secondary button mask maps
