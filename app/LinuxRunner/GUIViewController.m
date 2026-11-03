@@ -493,7 +493,7 @@ static NSString *ApplicationPreflightFailure(NSURL *session) {
     [super touchesCancelled:touches withEvent:event];
 }
 - (BOOL)gcPressTargetsSurface {
-    if(!self.window.isKeyWindow||self.hidden||!self.isFirstResponder||!_pixelWidth||!_pixelHeight)return NO;
+    if(!self.window.isKeyWindow||self.hidden||!_pixelWidth||!_pixelHeight)return NO;
     // Global GC callbacks must not click through a native settings sheet.
     for(UIResponder *r=self.nextResponder;r;r=r.nextResponder)if([r isKindOfClass:UIViewController.class]){
         UIViewController *controller=(UIViewController *)r;
