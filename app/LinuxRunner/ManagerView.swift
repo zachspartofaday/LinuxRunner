@@ -1550,6 +1550,7 @@ private struct DesktopControlSettings: View {
     @State private var state: [String: Any] = [:]
     @State private var health: [String: Any] = [:]
     @State private var pending: String?
+    @State private var sharedCapture = LRRuntimeBridge.desktopSharedImagesEnabled()
     @AppStorage("LinuxRunnerDesktop.externalDisplay") private var externalOutput = true
     @AppStorage("LinuxRunnerInput.touchpadGain") private var touchpadGain = 1.5
     @AppStorage("LinuxRunnerInput.mouseGain") private var mouseGain = 1.0
@@ -1563,7 +1564,7 @@ private struct DesktopControlSettings: View {
         // Presenting another native sheet waits until this one is dismissed.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { if name == "start", let openDesktop { openDesktop() } else { controller?.performDesktopAction(name) } }
     }
-    private func refresh() { state = handle.controller?.desktopControlState() as? [String: Any] ?? [:]; health = LRRuntimeBridge.healthSummary() as? [String: Any] ?? [:] }
+    private func refresh() { state = handle.controller?.desktopControlState() as? [String: Any] ?? [:]; health = LRRuntimeBridge.healthSummary() as? [String: Any] ?? [:]; sharedCapture = LRRuntimeBridge.desktopSharedImagesEnabled() }
     private func value(_ key: String) -> String { state[key] as? String ?? "Not available" }
     private var alive: Bool { state["alive"] as? Bool == true }
     var body: some View {
@@ -1584,6 +1585,11 @@ private struct DesktopControlSettings: View {
                 Section("Display") {
                     LabeledContentRow("Received framebuffer", value: value("framebuffer"))
                     NavigationLink("Resolution & Viewer Preferences", destination: DesktopPreferencesView())
+                    Toggle("Shared Image Capture", isOn: Binding(get: { sharedCapture }, set: { value in
+                        UserDefaults.standard.set(value, forKey: "LinuxRunnerGUISharedImages")
+                        sharedCapture = value
+                    }))
+                    Text("Applies after restarting the desktop. Turn off to use socket capture. If shared capture is unavailable, socket capture is used automatically.").font(.caption).foregroundColor(.secondary)
                     HStack { Button("Fit", action: { action("fit") }); Spacer(); Button("Actual Size", action: { action("actual") }); Spacer(); Button("Full Screen", action: { action("fullscreen") }) }
                     Toggle("External Desktop Output", isOn: $externalOutput)
                     LabeledContentRow("External scene", value: state["externalConnected"] as? Bool == true ? "Connected" : "Not connected")

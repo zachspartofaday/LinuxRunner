@@ -82,6 +82,11 @@ Alpine 3.24.2 is checksum-pinned. `ROOTFS_CACHE` can provide the cached archive;
 
 Guest helpers in `GUISupport.bundle` are not all rebuilt by an ordinary app build. Their sources/recipes are mapped in [bundled-guest-source-map.json](../licenses/bundled-guest-source-map.json). Preserve matching source and notices for the bundled rootfs, terminal renderer and graphics dependencies.
 
+The freestanding capture cleanup launcher is reproducible with
+`CAPTURE_LD=/path/to/ld.lld scripts/build-capture-shm-guard.sh`. Regenerate the
+GUI resource manifest afterward. See [capture cleanup](CAPTURE_CLEANUP.md) for
+its ARM64 host contract and physical-device qualification.
+
 ```sh
 meson setup build/host -Dengine=asbestos -Dguest_arch=arm64 -Djit=false -Djit_emit=false -Dcli_aot=
 ninja -C build/host ish
